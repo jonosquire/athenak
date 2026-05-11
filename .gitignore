@@ -47,3 +47,11 @@ __pycache__/
 
 # clangd / IDE compile DB
 compile_commands.json
+
+# Explicit root-local generated directories. These are already covered by the
+# deny-by-default root rule above, but keep them documented because cluster
+# builds and validation runs should never be committed.
+/build*/
+/cluster_validation/
+/cluster_validation_round2/
+/.codex

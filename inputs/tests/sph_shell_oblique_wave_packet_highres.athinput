@@ -1,0 +1,75 @@
+# AthenaK input: high-resolution broad oblique acoustic wave packet.
+# The packet is deliberately broader and more plane-wave-like than the original
+# compact vibe check, with k not aligned to r/theta/phi.
+
+<comment>
+problem   = sph_shell_hydro / oblique_packet / highres broad packet
+
+<job>
+basename  = SphShellObliqHigh
+
+<mesh>
+nghost    = 2
+nx1       = 300
+x1min     = 1.0
+x1max     = 7.0
+ix1_bc    = outflow
+ox1_bc    = outflow
+
+nx2       = 300
+x2min     = 0.5235987755982989
+x2max     = 2.6179938779914944
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 300
+x3min     = -1.0471975511965976
+x3max     =  1.0471975511965976
+ix3_bc    = outflow
+ox3_bc    = outflow
+
+<meshblock>
+nx1       = 100
+nx2       = 100
+nx3       = 100
+
+<coord>
+system    = spherical_shell
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = -1
+tlim       = 0.35
+ndiag      = 20
+
+<hydro>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hllc
+gamma           = 1.6666666666666667
+
+<output1>
+file_type   = vtk
+variable    = hydro_w
+dt          = 0.175
+ghost_zones = false
+
+<output2>
+file_type   = hst
+data_format = %12.5e
+dt          = 0.05
+
+<problem>
+mode  = oblique_packet
+rho0  = 1.0
+p0    = 0.6
+amp   = 5.0e-5
+sigma = 0.85
+x0    = 4.0
+y0    = 0.0
+z0    = 0.0
+kx    = 8.0
+ky    = 5.0
+kz    = 3.0

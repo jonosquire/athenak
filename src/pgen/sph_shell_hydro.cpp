@@ -81,6 +81,7 @@ namespace {
   static Real g_parker_rho_inner = 1.0;
   static Real g_parker_M_inner = 0.0;
   static Real g_parker_r_inner = 1.0;
+  static bool g_parker_outer_analytic = false;
 
   // Forward declarations
   void HydrostaticConstGFinalize(ParameterInput *pin, Mesh *pm);
@@ -191,10 +192,11 @@ void ProblemGenerator::UserProblem(ParameterInput *pin, const bool restart) {
   auto &eos = pmbp->phydro->peos->eos_data;
   auto geom = pmbp->pcoord->shell_geom;
   const Real gam = eos.gamma;
+  const bool is_ideal_eos = eos.is_ideal;
 
   g_rho0 = rho0;
   g_p0   = p0;
-  g_cs0  = std::sqrt(gam * p0 / rho0);
+  g_cs0  = is_ideal_eos ? std::sqrt(gam * p0 / rho0) : eos.iso_cs;
   g_gam  = gam;
 
   if (mode_str == "uniform") {
@@ -599,14 +601,36 @@ void ProblemGenerator::UserProblem(ParameterInput *pin, const bool restart) {
     // r_c = GM / (2 c_s^2), Mach M(r) from the transonic Parker equation
     // (bisection at each cell), rho(r) from mass continuity rho v_r r^2 = const
     // anchored at rho(r_inner) = rho_inner.
-    // Note: hydro EOS is ideal gas (gamma in input); the isothermal Parker
-    // solution will not be an exact steady state under adiabatic evolution.
-    // Use the user_bcs_func to hold the analytic inner BC; outer BC outflow.
+    // For preservation-style tests this should be run with hydro/eos=isothermal
+    // and hydro/iso_sound_speed = cs_iso. Adiabatic evolution is still allowed
+    // for backwards-compatible drift/relaxation checks, but is not exact.
     g_mode = Mode::kParkerIsothermal;
     pgen_final_func = ParkerIsothermalFinalize;
     user_bcs_func = ParkerRadialBCs;
     g_gm        = pin->GetReal("problem", "gm");
     g_parker_csiso = pin->GetReal("problem", "cs_iso");
+    if (!eos.is_ideal) {
+      const Real rel = std::abs(eos.iso_cs - g_parker_csiso) /
+                       std::max(std::abs(g_parker_csiso), 1.0e-30);
+      if (rel > 1.0e-12) {
+        std::cout << "### FATAL ERROR: parker_isothermal requires "
+                  << "<hydro>/iso_sound_speed to match <problem>/cs_iso. "
+                  << "Got iso_sound_speed=" << eos.iso_cs
+                  << " and cs_iso=" << g_parker_csiso << std::endl;
+        std::exit(EXIT_FAILURE);
+      }
+    }
+    std::string outer_bc = pin->GetOrAddString("problem", "outer_bc", "outflow");
+    if (outer_bc == "analytic") {
+      g_parker_outer_analytic = true;
+    } else if (outer_bc == "outflow") {
+      g_parker_outer_analytic = false;
+    } else {
+      std::cout << "### FATAL ERROR: parker_isothermal <problem>/outer_bc must be "
+                << "'analytic' or 'outflow', got '" << outer_bc << "'"
+                << std::endl;
+      std::exit(EXIT_FAILURE);
+    }
     g_parker_rho_inner = pin->GetOrAddReal("problem", "rho_inner", 1.0);
     g_parker_r_inner   = pmy_mesh_->mesh_size.x1min;
     g_parker_rc        = g_gm / (2.0 * g_parker_csiso * g_parker_csiso);
@@ -618,6 +642,7 @@ void ProblemGenerator::UserProblem(ParameterInput *pin, const bool restart) {
     const Real r_ref  = g_parker_r_inner;
     const Real rho_ref= g_parker_rho_inner;
     const Real M_ref  = g_parker_M_inner;
+    const bool is_ideal = eos.is_ideal;
     par_for("sph_parker_ic", DevExeSpace(),
             0, nmb1, ks, ke, js, je, is, ie,
     KOKKOS_LAMBDA(const int m, const int k, const int j, const int i) {
@@ -630,7 +655,9 @@ void ProblemGenerator::UserProblem(ParameterInput *pin, const bool restart) {
       u0(m, IM1, k, j, i) = rho * vr;
       u0(m, IM2, k, j, i) = 0.0;
       u0(m, IM3, k, j, i) = 0.0;
-      u0(m, IEN, k, j, i) = p / (gam - 1.0) + 0.5 * rho * vr * vr;
+      if (is_ideal) {
+        u0(m, IEN, k, j, i) = p / (gam - 1.0) + 0.5 * rho * vr * vr;
+      }
     });
 
   } else {
@@ -1498,6 +1525,8 @@ void ParkerRadialBCs(Mesh *pm) {
   auto geom = pmbp->pcoord->shell_geom;
   auto &eos = pmbp->phydro->peos->eos_data;
   const Real gam = eos.gamma;
+  const bool is_ideal = eos.is_ideal;
+  const bool outer_analytic = g_parker_outer_analytic;
   const Real cs    = g_parker_csiso;
   const Real rc    = g_parker_rc;
   const Real r_ref = g_parker_r_inner;
@@ -1520,18 +1549,38 @@ void ParkerRadialBCs(Mesh *pm) {
         u0(m, IM1, k, j, igh) = rho * vr;
         u0(m, IM2, k, j, igh) = 0.0;
         u0(m, IM3, k, j, igh) = 0.0;
-        u0(m, IEN, k, j, igh) = p / (gam - 1.0) + 0.5 * rho * vr * vr;
+        if (is_ideal) {
+          u0(m, IEN, k, j, igh) = p / (gam - 1.0) + 0.5 * rho * vr * vr;
+        }
       }
     }
     if (mb_bcs.d_view(m, BoundaryFace::outer_x1) == BoundaryFlag::user) {
-      // Outer ghosts: simple zero-gradient outflow copied from the last active.
+      // Outer ghosts: analytic Parker profile for strict preservation tests,
+      // or simple zero-gradient outflow for relaxation-style runs.
       for (int gi = 0; gi < ng; ++gi) {
         int igh = ie + 1 + gi;
-        u0(m, IDN, k, j, igh) = u0(m, IDN, k, j, ie);
-        u0(m, IM1, k, j, igh) = u0(m, IM1, k, j, ie);
-        u0(m, IM2, k, j, igh) = u0(m, IM2, k, j, ie);
-        u0(m, IM3, k, j, igh) = u0(m, IM3, k, j, ie);
-        u0(m, IEN, k, j, igh) = u0(m, IEN, k, j, ie);
+        if (outer_analytic) {
+          Real r = geom.r_vol(m, igh);
+          Real M = ParkerMachAtR(r, rc);
+          Real vr  = M * cs;
+          Real rho = rho_ref * (M_ref / M) * (r_ref / r) * (r_ref / r);
+          Real p   = cs * cs * rho;
+          u0(m, IDN, k, j, igh) = rho;
+          u0(m, IM1, k, j, igh) = rho * vr;
+          u0(m, IM2, k, j, igh) = 0.0;
+          u0(m, IM3, k, j, igh) = 0.0;
+          if (is_ideal) {
+            u0(m, IEN, k, j, igh) = p / (gam - 1.0) + 0.5 * rho * vr * vr;
+          }
+        } else {
+          u0(m, IDN, k, j, igh) = u0(m, IDN, k, j, ie);
+          u0(m, IM1, k, j, igh) = u0(m, IM1, k, j, ie);
+          u0(m, IM2, k, j, igh) = u0(m, IM2, k, j, ie);
+          u0(m, IM3, k, j, igh) = u0(m, IM3, k, j, ie);
+          if (is_ideal) {
+            u0(m, IEN, k, j, igh) = u0(m, IEN, k, j, ie);
+          }
+        }
       }
     }
   });
@@ -1558,16 +1607,18 @@ void ParkerIsothermalFinalize(ParameterInput *pin, Mesh *pm) {
   const Real r_ref = g_parker_r_inner;
   const Real rho_ref = g_parker_rho_inner;
   const Real M_ref = g_parker_M_inner;
+  const Real mdot_ref = rho_ref * (M_ref * cs) * r_ref * r_ref;
   int Ncell = (nmb1+1)*(ke-ks+1)*(je-js+1)*(ie-is+1);
 
   Real linf_v = 0.0, linf_rho = 0.0;
   Real l1_v = 0.0, l2_v = 0.0;
   Real l1_rho = 0.0, l2_rho = 0.0;
+  Real l1_mdot = 0.0, linf_mdot = 0.0;
   Kokkos::parallel_reduce("parker_diag",
     Kokkos::RangePolicy<>(DevExeSpace(), 0, Ncell),
   KOKKOS_LAMBDA(const int idx,
                 Real &lv, Real &lr, Real &mxv, Real &mxr,
-                Real &sv, Real &sr) {
+                Real &sv, Real &sr, Real &lm, Real &mxm) {
     int nx1 = ie - is + 1, nx2 = je - js + 1, nx3 = ke - ks + 1;
     int nji = nx2 * nx1, nkji = nx3 * nx2 * nx1;
     int m = idx / nkji;
@@ -1581,18 +1632,24 @@ void ParkerIsothermalFinalize(ParameterInput *pin, Mesh *pm) {
     Real rho_an = rho_ref * (M_ref / M) * (r_ref / r) * (r_ref / r);
     Real rho = u0(m, IDN, k, j, i);
     Real vr  = u0(m, IM1, k, j, i) / rho;
+    Real mdot = rho * vr * r * r;
     Real ev = Kokkos::fabs((vr  - vr_an)  / vr_an);
     Real er = Kokkos::fabs((rho - rho_an) / rho_an);
+    Real em = Kokkos::fabs((mdot - mdot_ref) / mdot_ref);
     if (ev > mxv) mxv = ev;
     if (er > mxr) mxr = er;
+    if (em > mxm) mxm = em;
     lv += ev;
     lr += er;
     sv += ev * ev;
     sr += er * er;
+    lm += em;
   }, l1_v, l1_rho, Kokkos::Max<Real>(linf_v),
-     Kokkos::Max<Real>(linf_rho), l2_v, l2_rho);
+     Kokkos::Max<Real>(linf_rho), l2_v, l2_rho,
+     l1_mdot, Kokkos::Max<Real>(linf_mdot));
   l1_v /= static_cast<Real>(Ncell);
   l1_rho /= static_cast<Real>(Ncell);
+  l1_mdot /= static_cast<Real>(Ncell);
   l2_v = std::sqrt(l2_v / static_cast<Real>(Ncell));
   l2_rho = std::sqrt(l2_rho / static_cast<Real>(Ncell));
 
@@ -1607,7 +1664,10 @@ void ParkerIsothermalFinalize(ParameterInput *pin, Mesh *pm) {
             << "[parker_isothermal] Linf|dv_r/v_r| = " << linf_v << "\n"
             << "[parker_isothermal] L1 |drho/rho|  = " << l1_rho << "\n"
             << "[parker_isothermal] L2 |drho/rho|  = " << l2_rho << "\n"
-            << "[parker_isothermal] Linf|drho/rho| = " << linf_rho
+            << "[parker_isothermal] Linf|drho/rho| = " << linf_rho << "\n"
+            << "[parker_isothermal] mdot_ref       = " << mdot_ref << "\n"
+            << "[parker_isothermal] L1 |dmdot/mdot| = " << l1_mdot << "\n"
+            << "[parker_isothermal] Linf|dmdot/mdot|= " << linf_mdot
             << std::endl;
 }
 

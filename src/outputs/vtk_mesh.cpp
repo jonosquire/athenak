@@ -92,6 +92,22 @@ void MeshVTKOutput::WriteOutputFile(Mesh *pm, ParameterInput *pin) {
 
   // Write parts 1-4: Create string with header text.
   std::stringstream msg;
+  const auto coord_system = pm->pmb_pack->pcoord->coord_system;
+  const auto radial_grid = pm->pmb_pack->pcoord->radial_grid;
+  const char *coord_name = (coord_system == CoordinateSystem::spherical_shell) ?
+                           "spherical_shell" : "cartesian";
+  const char *radial_name = "none";
+  if (coord_system == CoordinateSystem::spherical_shell) {
+    if (radial_grid == RadialGridType::uniform) {
+      radial_name = "uniform";
+    } else if (radial_grid == RadialGridType::log) {
+      radial_name = "log";
+    } else if (radial_grid == RadialGridType::power_law) {
+      radial_name = "power_law";
+    } else if (radial_grid == RadialGridType::user) {
+      radial_name = "user";
+    }
+  }
   msg << "# vtk DataFile Version 2.0" << std::endl
       << std::scientific << std::setprecision(time_precision)
       << "# Athena++ data at time= " << pm->time
@@ -99,6 +115,8 @@ void MeshVTKOutput::WriteOutputFile(Mesh *pm, ParameterInput *pin) {
       << "  nranks= " << global_variable::nranks
       << "  cycle=" << pm->ncycle
       << "  variables=" << out_params.variable
+      << "  coordinate_system=" << coord_name
+      << "  radial_grid=" << radial_name
       << std::endl << "BINARY" << std::endl
       << "DATASET STRUCTURED_POINTS" << std::endl
       << "DIMENSIONS " << ncoord1 << " " << ncoord2 << " " << ncoord3 << std::endl;

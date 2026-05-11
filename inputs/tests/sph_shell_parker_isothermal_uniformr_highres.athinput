@@ -1,0 +1,76 @@
+# AthenaK input: isothermal-hydro Parker wind preservation test, uniform r.
+# Build/run with PROBLEM=sph_shell_hydro and <hydro>/eos=isothermal.
+
+<comment>
+problem   = sph_shell_hydro / parker_isothermal / uniform-r / isothermal hydro
+
+<job>
+basename  = SphShellParkerIsoUniformR
+
+<mesh>
+nghost    = 2
+nx1       = 512
+x1min     = 1.0
+x1max     = 20.0
+ix1_bc    = user
+ox1_bc    = user
+
+nx2       = 32
+x2min     = 0.7853981633974483
+x2max     = 2.356194490192345
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 32
+x3min     = 0.0
+x3max     = 1.5707963267948966
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 128
+nx2       = 32
+nx3       = 32
+
+<coord>
+system          = spherical_shell
+verify_geometry = false
+
+<spherical_shell>
+radial_grid     = uniform
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = -1
+tlim       = 2.0
+ndiag      = 100
+
+<hydro>
+eos             = isothermal
+iso_sound_speed = 0.5
+reconstruct     = plm
+rsolver         = hlle
+
+<hydro_srcterms>
+r_inv_sq_gravity = true
+r_inv_sq_gm      = 1.0
+
+<output1>
+file_type   = vtk
+variable    = hydro_w
+dt          = 0.5
+ghost_zones = false
+
+<output2>
+file_type   = hst
+data_format = %12.5e
+dt          = 0.1
+
+<problem>
+mode      = parker_isothermal
+gm        = 1.0
+cs_iso    = 0.5
+rho_inner = 1.0
+outer_bc  = analytic
