@@ -1,0 +1,81 @@
+# AthenaK input: near-Keplerian circular orbit in 1/r^2 gravity.
+# IC: rho=rho0, p=p0, v_r=v_th=0, v_phi = sqrt(GM/r) * sin(theta).
+# A thin near-equatorial wedge with periodic phi. Radial direction has
+# approximate balance (centrifugal vs. gravity) at theta=pi/2; theta
+# direction is not exactly balanced.
+#
+# Diagnostics:
+#   - relative drift of total angular momentum Lz
+#   - relative drift of total mass M
+#   - max|v_r|/|v_phi| (should be small at early times)
+#
+# Build with -DPROBLEM=sph_shell_hydro.
+
+<comment>
+problem   = sph_shell_hydro / keplerian_orbit
+
+<job>
+basename  = SphShellKepler
+
+<mesh>
+nghost    = 2
+nx1       = 32
+x1min     = 1.0
+x1max     = 2.0
+ix1_bc    = outflow
+ox1_bc    = outflow
+
+nx2       = 16
+x2min     = 1.3707963267948966   # pi/2 - 0.2
+x2max     = 1.7707963267948966   # pi/2 + 0.2
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 32
+x3min     = 0.0
+x3max     = 6.283185307179586    # 2*pi
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 32
+nx2       = 16
+nx3       = 32
+
+<coord>
+system          = spherical_shell
+verify_geometry = false
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = -1
+tlim       = 5.0                 # ~ 1 orbital period at r=1 (T = 2 pi sqrt(r^3/GM))
+
+<hydro>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hllc
+gamma           = 1.6666666666666667
+
+<hydro_srcterms>
+r_inv_sq_gravity = true
+r_inv_sq_gm      = 1.0
+
+<output1>
+file_type   = vtk
+variable    = hydro_w
+dt          = 1.0
+ghost_zones = false
+
+<output2>
+file_type   = hst
+data_format = %12.5e
+dt          = 0.2
+
+<problem>
+mode = keplerian_orbit
+rho0 = 1.0
+p0   = 0.001         # very cold so v_phi >> cs
+gm   = 1.0

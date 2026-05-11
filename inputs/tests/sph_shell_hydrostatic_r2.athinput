@@ -1,0 +1,73 @@
+# AthenaK input: isothermal hydrostatic atmosphere in 1/r^2 gravity.
+# Analytic IC:
+#   rho(r) = rho0 * exp[(GM/c_s^2) * (1/r - 1/r_ref)],   p = rho c_s^2.
+# Background: rho0=1, p0=1, c_s_iso=1; GM=0.5 so the gravitational potential
+# at r=r_ref=1 has |GM/r_ref|=0.5 = 0.5 c_s^2 (mild bound atmosphere).
+# Hydro is adiabatic gamma=5/3; isothermal IC is not an exact adiabatic
+# equilibrium so v will grow slowly. Diagnostic prints max|v|/cs and rho/p drifts.
+# Build with -DPROBLEM=sph_shell_hydro.
+
+<comment>
+problem   = sph_shell_hydro / hydrostatic_r2
+
+<job>
+basename  = SphShellHSEr2
+
+<mesh>
+nghost    = 2
+nx1       = 64
+x1min     = 1.0
+x1max     = 3.0
+ix1_bc    = outflow
+ox1_bc    = outflow
+
+nx2       = 8
+x2min     = 1.4707963267948966
+x2max     = 1.6707963267948966
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 8
+x3min     = 0.0
+x3max     = 0.2
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 64
+nx2       = 8
+nx3       = 8
+
+<coord>
+system          = spherical_shell
+verify_geometry = false
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = -1
+tlim       = 0.5
+
+<hydro>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hllc
+gamma           = 1.6666666666666667
+
+<hydro_srcterms>
+r_inv_sq_gravity = true
+r_inv_sq_gm      = 0.5      # GM
+
+<output1>
+file_type   = vtk
+variable    = hydro_w
+dt          = 0.1
+ghost_zones = false
+
+<problem>
+mode  = hydrostatic_r2
+rho0  = 1.0
+p0    = 1.0
+gm    = 0.5
+r_ref = 1.0

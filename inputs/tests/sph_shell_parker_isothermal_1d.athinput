@@ -1,0 +1,81 @@
+# AthenaK input: quasi-1D analytic isothermal Parker wind initialiser.
+# Computes Parker M(r) via on-device bisection of the transonic equation
+#   M^2 - ln(M^2) = 4 ln(r/r_c) + 4 r_c/r - 3,    r_c = GM / (2 c_s^2)
+# selecting the subsonic branch for r<r_c and supersonic branch for r>r_c.
+# Density anchored at the inner radius via mass continuity (rho v_r r^2 = const).
+#
+# Background: GM=1.0, cs_iso=0.5 -> r_c = 1.0 / (2 * 0.25) = 2.0.
+# Domain r in [1, 6] so Parker passes through the critical point inside.
+#
+# Hydro is adiabatic (gamma=5/3) whereas the analytic Parker solution is
+# isothermal. The IC profile will not be an exact adiabatic steady state but
+# should not drift catastrophically over short times. The user_bcs_func holds
+# the analytic Parker state at the inner radial ghost zones; outer is
+# zero-gradient outflow.
+#
+# Build with -DPROBLEM=sph_shell_hydro.
+
+<comment>
+problem   = sph_shell_hydro / parker_isothermal (1D)
+
+<job>
+basename  = SphShellParker1D
+
+<mesh>
+nghost    = 2
+nx1       = 256
+x1min     = 1.0
+x1max     = 6.0
+ix1_bc    = user
+ox1_bc    = user
+
+nx2       = 8
+x2min     = 1.4707963267948966
+x2max     = 1.6707963267948966
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 8
+x3min     = 0.0
+x3max     = 0.2
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 256
+nx2       = 8
+nx3       = 8
+
+<coord>
+system          = spherical_shell
+verify_geometry = false
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = -1
+tlim       = 0.5
+
+<hydro>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hllc
+gamma           = 1.6666666666666667
+
+<hydro_srcterms>
+r_inv_sq_gravity = true
+r_inv_sq_gm      = 1.0
+
+<output1>
+file_type   = vtk
+variable    = hydro_w
+dt          = 0.1
+ghost_zones = false
+
+<problem>
+mode      = parker_isothermal
+gm        = 1.0
+cs_iso    = 0.5
+rho_inner = 1.0
+p0        = 0.25       # = cs_iso^2 (only used as IC reference for energy)

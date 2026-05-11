@@ -14,6 +14,7 @@
 #include "cartesian_ks.hpp"
 #include "coordinates.hpp"
 #include "cell_locations.hpp"
+#include "spherical_shell.hpp"
 #include "hydro/hydro.hpp"
 #include "mhd/mhd.hpp"
 
@@ -38,6 +39,82 @@ Coordinates::Coordinates(ParameterInput *pin, MeshBlockPack *ppack) :
     std::cout << "### FATAL ERROR in "<< __FILE__ <<" at line " << __LINE__ << std::endl
               << "Cannot specify both SR and GR at same time" << std::endl;
     std::exit(EXIT_FAILURE);
+  }
+
+  // Logical-Cartesian coordinate system selector. Default cartesian preserves all
+  // existing AthenaK behaviour. Only "spherical_shell" is offered as an alternative
+  // and is mutually exclusive with relativistic options.
+  {
+    std::string sys = pin->GetOrAddString("coord", "system", "cartesian");
+    if (sys == "cartesian") {
+      coord_system = CoordinateSystem::cartesian;
+    } else if (sys == "spherical_shell") {
+      coord_system = CoordinateSystem::spherical_shell;
+      if (is_special_relativistic || is_general_relativistic ||
+          is_dynamical_relativistic) {
+        std::cout << "### FATAL ERROR in " << __FILE__ << " at line "
+                  << __LINE__ << std::endl
+                  << "spherical_shell coordinates are not supported with relativistic"
+                  << " dynamics in this fork." << std::endl;
+        std::exit(EXIT_FAILURE);
+      }
+      if (pin->DoesBlockExist("mhd")) {
+        std::cout << "### FATAL ERROR in " << __FILE__ << " at line "
+                  << __LINE__ << std::endl
+                  << "spherical_shell coordinates currently support hydro only;"
+                  << " MHD/CT integration is deferred to a later task." << std::endl;
+        std::exit(EXIT_FAILURE);
+      }
+      // Radial grid selection (see SphericalShellGeom::RadialGridType).
+      std::string rgrid =
+          pin->GetOrAddString("spherical_shell", "radial_grid", "uniform");
+      Real grid_alpha = pin->GetOrAddReal("spherical_shell", "r_grid_alpha", 1.0);
+      if (rgrid == "uniform") {
+        radial_grid = RadialGridType::uniform;
+      } else if (rgrid == "log") {
+        radial_grid = RadialGridType::log;
+        if (pmy_pack->pmesh->mesh_size.x1min <= 0.0) {
+          std::cout << "### FATAL ERROR in " << __FILE__ << " at line "
+                    << __LINE__ << std::endl
+                    << "spherical_shell radial_grid=log requires"
+                    << " <mesh>/x1min > 0" << std::endl;
+          std::exit(EXIT_FAILURE);
+        }
+      } else if (rgrid == "power_law") {
+        radial_grid = RadialGridType::power_law;
+      } else if (rgrid == "user") {
+        radial_grid = RadialGridType::user;
+        if (GetUserRadialGridFunc() == nullptr) {
+          std::cout << "### FATAL ERROR in " << __FILE__ << " at line "
+                    << __LINE__ << std::endl
+                    << "spherical_shell radial_grid=user but no user function"
+                    << " has been registered via SetUserRadialGridFunc()."
+                    << " See README-sph.md." << std::endl;
+          std::exit(EXIT_FAILURE);
+        }
+      } else {
+        std::cout << "### FATAL ERROR in " << __FILE__ << " at line "
+                  << __LINE__ << std::endl
+                  << "Unknown <spherical_shell>/radial_grid = '"
+                  << rgrid << "'. Allowed: uniform, log, power_law, user."
+                  << std::endl;
+        std::exit(EXIT_FAILURE);
+      }
+      // Build the per-pack geometry container on device. Done once at setup -- no
+      // host-side trig is performed in hot paths after this point.
+      ConstructSphericalShellGeometry(pmy_pack, shell_geom,
+                                      radial_grid, grid_alpha);
+      // Run a wedge-volume sanity check (default on, can be disabled in input).
+      if (pin->GetOrAddBoolean("coord", "verify_geometry", true)) {
+        VerifySphericalShellVolume(pmy_pack, shell_geom, true);
+      }
+    } else {
+      std::cout << "### FATAL ERROR in " << __FILE__ << " at line "
+                << __LINE__ << std::endl
+                << "Unknown <coord> system = '" << sys << "'."
+                << " Allowed values: cartesian, spherical_shell." << std::endl;
+      std::exit(EXIT_FAILURE);
+    }
   }
 
   // Read properties of metric and excision from input file for GR.

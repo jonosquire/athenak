@@ -1,0 +1,65 @@
+# AthenaK input: radial acoustic propagation on a LOG-R grid.
+# Same Gaussian outgoing pulse as sph_shell_radial_acoustic.athinput, but the
+# radial faces are uniform in ln(r). The pulse propagates at cs0=1.0 in r;
+# the centroid diagnostic should report speed_est ~ cs0 within the standard
+# physical bias.
+# Build with -DPROBLEM=sph_shell_hydro.
+
+<comment>
+problem   = sph_shell_hydro / radial_acoustic (log-r)
+
+<job>
+basename  = SphShellRadAcLogR
+
+<mesh>
+nghost    = 2
+nx1       = 256
+x1min     = 1.0
+x1max     = 8.0
+ix1_bc    = outflow
+ox1_bc    = outflow
+
+nx2       = 8
+x2min     = 1.4707963267948966
+x2max     = 1.6707963267948966
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 8
+x3min     = 0.0
+x3max     = 0.2
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 256
+nx2       = 8
+nx3       = 8
+
+<coord>
+system          = spherical_shell
+verify_geometry = false
+
+<spherical_shell>
+radial_grid = log
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = -1
+tlim       = 1.0
+
+<hydro>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hllc
+gamma           = 1.6666666666666667
+
+<problem>
+mode = radial_acoustic
+rho0 = 1.0
+p0   = 0.6        # cs0 = 1.0
+amp  = 1.0e-4
+rc   = 2.5        # safely inside [1, 8]
+rw   = 0.2        # broader pulse for log grid (cell width grows with r)

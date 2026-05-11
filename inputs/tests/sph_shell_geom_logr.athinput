@@ -1,0 +1,61 @@
+# AthenaK input: spherical-shell geometry sanity on a LOG-R radial grid.
+# Same wedge as sph_shell_geom.athinput, but radial faces uniformly spaced
+# in ln(r). Cell volume is computed from face positions only, so the total
+# volume should match the analytic spherical-wedge volume to near roundoff
+# regardless of the radial spacing rule.
+# Build with -DPROBLEM=sph_shell_hydro (or anything pgen).
+
+<comment>
+problem   = sph_shell_geom log-r
+
+<job>
+basename  = SphShellGeomLogR
+
+<mesh>
+nghost    = 2
+nx1       = 64
+x1min     = 1.0
+x1max     = 10.0
+ix1_bc    = outflow
+ox1_bc    = outflow
+
+nx2       = 32
+x2min     = 0.39269908169872414
+x2max     = 2.748893571891069
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 16
+x3min     = 0.0
+x3max     = 1.5707963267948966
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 64
+nx2       = 32
+nx3       = 16
+
+<coord>
+system    = spherical_shell
+
+<spherical_shell>
+radial_grid = log
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = 0
+tlim       = 1.0
+
+<hydro>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hllc
+gamma           = 1.6666666666666667
+
+<problem>
+mode  = uniform
+rho0  = 1.0
+p0    = 1.0

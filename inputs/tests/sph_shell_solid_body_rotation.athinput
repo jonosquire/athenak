@@ -1,0 +1,64 @@
+# AthenaK input: solid-body rotation one-step centrifugal-source diagnostic.
+# IC: uniform rho, uniform p, v_r=v_theta=0, v_phi = Omega * r * sin(theta).
+# After one RK cycle, the diagnostic measures the per-unit-time momentum
+# changes and compares to the analytic centrifugal predictions in the
+# spherical FV+source path:
+#   d(rho v_r)/dt    ~ rho * Omega^2 * r * sin^2(theta)
+#   d(rho v_th)/dt   ~ rho * Omega^2 * r * sin*cos
+#   d(rho v_phi)/dt  ~ 0
+# Use small Omega so Omega*dt << 1; the linear approximation is then accurate.
+# Build with -DPROBLEM=sph_shell_hydro.
+
+<comment>
+problem   = sph_shell_hydro / solid_body_rotation
+
+<job>
+basename  = SphShellSBR
+
+<mesh>
+nghost    = 2
+nx1       = 32
+x1min     = 1.0
+x1max     = 2.0
+ix1_bc    = outflow
+ox1_bc    = outflow
+
+nx2       = 16
+x2min     = 0.7853981633974483
+x2max     = 2.356194490192345
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 8
+x3min     = 0.0
+x3max     = 0.7853981633974483
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 32
+nx2       = 16
+nx3       = 8
+
+<coord>
+system          = spherical_shell
+verify_geometry = false
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = 1
+tlim       = 1.0
+
+<hydro>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hllc
+gamma           = 1.6666666666666667
+
+<problem>
+mode  = solid_body_rotation
+rho0  = 1.0
+p0    = 1.0
+Omega = 0.05

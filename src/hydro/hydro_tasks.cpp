@@ -248,6 +248,15 @@ TaskStatus Hydro::HydroSrcTerms(Driver *pdrive, int stage) {
     pmy_pack->pcoord->CoordSrcTerms(w0, peos->eos_data, beta_dt, u0);
   }
 
+  // Add Newtonian spherical-shell geometric source terms. These need both primitives
+  // AND the radial/theta Riemann fluxes used in the same RK stage's flux divergence
+  // (Athena++ flux-area-weighted convention for the rho v_r v_t / r and
+  // rho v_t v_p cot/r terms).
+  if (pmy_pack->pcoord->coord_system == CoordinateSystem::spherical_shell) {
+    pmy_pack->pcoord->AddSphericalShellHydroSrcTerms(
+        w0, uflx.x1f, uflx.x2f, peos->eos_data, beta_dt, u0);
+  }
+
   // Add user source terms
   if (pmy_pack->pmesh->pgen->user_srcs) {
     (pmy_pack->pmesh->pgen->user_srcs_func)(pmy_pack->pmesh, beta_dt);

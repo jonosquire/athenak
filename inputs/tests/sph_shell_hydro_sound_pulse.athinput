@@ -1,0 +1,63 @@
+# AthenaK input: spherical-shell hydro radial sound pulse smoke test.
+# Initialises a small Gaussian density+pressure perturbation in r and evolves
+# for some time. Verifies that the spherical FV path runs to completion and
+# that the pulse propagates outward at roughly the sound speed.
+# Build with -DPROBLEM=sph_shell_hydro.
+
+<comment>
+problem   = sph_shell_hydro / sound_pulse
+
+<job>
+basename  = SphShellPulse
+
+<mesh>
+nghost    = 2
+
+nx1       = 128
+x1min     = 1.0
+x1max     = 3.0
+ix1_bc    = outflow
+ox1_bc    = outflow
+
+# narrow theta wedge -- effectively radial 1D for the pulse propagation
+nx2       = 8
+x2min     = 1.4707963267948966   # pi/2 - 0.1
+x2max     = 1.6707963267948966   # pi/2 + 0.1
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 8
+x3min     = 0.0
+x3max     = 0.2
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 128
+nx2       = 8
+nx3       = 8
+
+<coord>
+system    = spherical_shell
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = -1
+tlim       = 0.6
+
+<hydro>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hllc
+gamma           = 1.6666666666666667
+
+<problem>
+mode = sound_pulse
+rho0 = 1.0
+p0   = 0.6                  # cs0 = sqrt(gamma * p / rho) = 1.0
+amp  = 1.0e-3               # small enough to be linear
+rc   = 1.5
+rw   = 0.1
+entropy_pulse = false

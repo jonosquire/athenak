@@ -1,19 +1,49 @@
-# build directories
-build*/
+# AthenaK .gitignore
+#
+# Strategy: deny-by-default at the repo root, then whitelist the known set
+# of tracked top-level entries. Any new file or directory that appears at
+# the root (build output, run output, scratch dirs, restarts, dat/vtk/tab
+# dumps, IDE scratch, etc.) is ignored automatically.
+#
+# If a NEW top-level tracked entry is ever added it must be whitelisted
+# below -- this is the deliberate trade-off for not having to enumerate
+# every output extension or output directory.
 
-# Athena output files
-*.tab
-*.vtk
-*.bin
-*.athdf*
-*.hst
-*.rst
+/*
 
-# Mac OS metadata
+# --- Whitelist tracked top-level entries -------------------------------------
+!/.git*
+!/AGENTS.md
+!/CMakeLists.txt
+!/CODE_OF_CONDUCT.md
+!/CONTRIBUTING.md
+!/CPPLINT.cfg
+!/LICENSE
+!/README.md
+!/README-sph.md
+!/config.hpp.in
+!/setup.cfg
+
+!/inputs/
+!/kokkos
+!/scripts/
+!/src/
+!/srcpp/
+!/tst/
+!/vis/
+
+# --- Patterns that apply anywhere in the tree --------------------------------
+# Editor / OS metadata
 .DS_Store
-.vscode
-
-# editor temp files
-*~
+.vscode/
+.idea/
+.vs/
 *.swp
-Lorene
+*~
+
+# Python caches (vis/ and scripts/ ship Python helpers)
+__pycache__/
+*.pyc
+
+# clangd / IDE compile DB
+compile_commands.json

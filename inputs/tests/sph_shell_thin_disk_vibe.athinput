@@ -1,0 +1,87 @@
+# AthenaK input: pressure-supported thin disk vibe check in 1/r^2 gravity.
+# IC:
+#   rho(r, theta) = rho_floor + rho0 * exp(-(r-r_disk)^2/(2 sigma_r^2))
+#                              * exp(-(theta-pi/2)^2/(2 sigma_th^2))
+#   p             = rho * c_s^2
+#   v_phi         = sqrt(GM/r) * sin(theta)
+#
+# Vibe expectations (plot rho, v_phi in r-theta slices from VTK):
+#   - A thin band near the equator that remains coherent for a few local
+#     orbital times (T_orbit ~ 2 pi sqrt(r^3/GM) ~ 6.3 at r=1, GM=1).
+#   - No abrupt radial spokes, theta rings, or MeshBlock seams.
+#   - Adjustment waves are expected because this IC is NOT an exact equilibrium.
+#
+# Build with -DPROBLEM=sph_shell_hydro.
+
+<comment>
+problem   = sph_shell_hydro / thin_disk
+
+<job>
+basename  = SphShellThinDisk
+
+<mesh>
+nghost    = 2
+nx1       = 64
+x1min     = 1.0
+x1max     = 3.0
+ix1_bc    = outflow
+ox1_bc    = outflow
+
+nx2       = 32
+x2min     = 1.0707963267948966   # pi/2 - 0.5
+x2max     = 2.0707963267948966   # pi/2 + 0.5
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 32
+x3min     = 0.0
+x3max     = 6.283185307179586
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 64
+nx2       = 32
+nx3       = 32
+
+<coord>
+system          = spherical_shell
+verify_geometry = false
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = -1
+tlim       = 6.3                 # ~ 1 orbital period at r=1
+
+<hydro>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hllc
+gamma           = 1.6666666666666667
+
+<hydro_srcterms>
+r_inv_sq_gravity = true
+r_inv_sq_gm      = 1.0
+
+<output1>
+file_type   = vtk
+variable    = hydro_w
+dt          = 0.5
+ghost_zones = false
+
+<output2>
+file_type   = hst
+data_format = %12.5e
+dt          = 0.2
+
+<problem>
+mode      = thin_disk
+rho0      = 1.0
+p0        = 0.01      # cs ~ 0.1 << v_phi ~ 1
+gm        = 1.0
+r_disk    = 1.5
+sigma_r   = 0.3
+sigma_th  = 0.07
+rho_floor = 1.0e-3

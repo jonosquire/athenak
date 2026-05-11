@@ -1,0 +1,72 @@
+# AthenaK input: 3D analytic isothermal Parker wind (visual / vibe check).
+# Identical Parker IC as the 1D variant but on a 3D wedge spanning a sizable
+# theta-phi range. Since the analytic Parker solution depends only on r,
+# the 3D run should remain angularly quiet -- any spontaneous theta or phi
+# striping in the VTK output is suspicious and would indicate wrong geometric
+# source terms.
+# Build with -DPROBLEM=sph_shell_hydro.
+
+<comment>
+problem   = sph_shell_hydro / parker_isothermal (3D)
+
+<job>
+basename  = SphShellParker3D
+
+<mesh>
+nghost    = 2
+nx1       = 64
+x1min     = 1.0
+x1max     = 6.0
+ix1_bc    = user
+ox1_bc    = user
+
+nx2       = 32
+x2min     = 0.7853981633974483
+x2max     = 2.356194490192345
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 32
+x3min     = 0.0
+x3max     = 1.5707963267948966
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 64
+nx2       = 32
+nx3       = 32
+
+<coord>
+system          = spherical_shell
+verify_geometry = false
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = -1
+tlim       = 0.5
+
+<hydro>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hllc
+gamma           = 1.6666666666666667
+
+<hydro_srcterms>
+r_inv_sq_gravity = true
+r_inv_sq_gm      = 1.0
+
+<output1>
+file_type   = vtk
+variable    = hydro_w
+dt          = 0.1
+ghost_zones = false
+
+<problem>
+mode      = parker_isothermal
+gm        = 1.0
+cs_iso    = 0.5
+rho_inner = 1.0
+p0        = 0.25

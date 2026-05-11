@@ -34,6 +34,7 @@ class SourceTerms {
   bool ism_cooling;
   bool rel_cooling;
   bool rad_beam;
+  bool r_inv_sq_gravity;  // 1/r^2 radial gravity (spherical_shell hydro only)
 
   // new timestep
   Real dtnew;
@@ -41,6 +42,9 @@ class SourceTerms {
   // data for constant accel
   Real const_accel_val;   // magnitude of accn
   int const_accel_dir;    // direction of accn
+
+  // data for inverse-square radial gravity (g_r = -GM/r^2). Used for solar/Parker.
+  Real r_inv_sq_gm;        // value of GM
 
   // data for ISM cooling
   Real hrate;
@@ -60,6 +64,10 @@ class SourceTerms {
                      const Real bdt, DvceArray5D<Real> &u0);
   void ApplySrcTerms(DvceArray5D<Real> &i0, const Real bdt);
   void ConstantAccel(const DvceArray5D<Real> &w0, const EOS_Data &eos,
+                     const Real bdt, DvceArray5D<Real> &u0);
+  // Radial inverse-square gravity g_r = -GM/r^2. Requires spherical_shell coords.
+  // Energy source is rho * v_r * g_r (not a potential-energy formulation).
+  void RInvSqGravity(const DvceArray5D<Real> &w0, const EOS_Data &eos,
                      const Real bdt, DvceArray5D<Real> &u0);
   void ISMCooling(const DvceArray5D<Real> &w0, const EOS_Data &eos,
                   const Real bdt, DvceArray5D<Real> &u0);

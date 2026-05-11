@@ -1,0 +1,67 @@
+# AthenaK input file: spherical-shell geometry sanity check.
+# This is NOT a hydro evolution test -- it only allocates the spherical_shell geometry
+# arrays and prints a wedge-volume sanity comparison from the Coordinates constructor.
+# Time integration is suppressed with time/nlim=0 because the hydro flux divergence
+# and CFL kernels are still Cartesian in this initial infrastructure task.
+
+<comment>
+problem   = spherical-shell geometry sanity check
+
+<job>
+basename  = SphShellGeom
+
+<mesh>
+nghost    = 2
+nx1       = 64                    # r-direction cells
+x1min     = 1.0                   # r0
+x1max     = 2.0                   # r1
+ix1_bc    = outflow
+ox1_bc    = outflow
+
+nx2       = 32                    # theta-direction cells
+x2min     = 0.39269908169872414   # pi/8 (avoid pole)
+x2max     = 2.748893571891069     # 7*pi/8
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 16                    # phi-direction cells
+x3min     = 0.0
+x3max     = 1.5707963267948966    # pi/2
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 64
+nx2       = 32
+nx3       = 16
+
+<coord>
+system    = spherical_shell
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = 0                    # no integration steps; only check setup
+tlim       = 1.0
+
+<hydro>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hllc
+gamma           = 1.6666667
+
+<problem>
+pgen_name = shock_tube
+shock_dir = 1
+xshock    = 1.5
+dl = 1.0
+pl = 1.0
+ul = 0.0
+vl = 0.0
+wl = 0.0
+dr = 0.125
+pr = 0.1
+ur = 0.0
+vr = 0.0
+wr = 0.0

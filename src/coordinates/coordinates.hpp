@@ -14,6 +14,7 @@
 #include "athena.hpp"
 #include "parameter_input.hpp"
 #include "mesh/mesh.hpp"
+#include "coordinates/spherical_shell.hpp"
 
 // forward declarations
 struct EOS_Data;
@@ -22,6 +23,20 @@ struct EOS_Data;
 enum class ExcisionScheme {
   fixed,
   lapse
+};
+
+//----------------------------------------------------------------------------------------
+//! \enum CoordinateSystem
+//! \brief Selector for the logical-Cartesian coordinate system used by hydro/MHD.
+//! Default is cartesian (existing AthenaK behaviour). spherical_shell is the new
+//! single-purpose spherical-polar option (r, theta, phi). Other curvilinear systems
+//! are intentionally NOT supported -- this is a research fork, not a general framework.
+//! GR coordinates (Cartesian Kerr-Schild) are handled separately via
+//! is_general_relativistic / coord_data.
+
+enum class CoordinateSystem {
+  cartesian,
+  spherical_shell
 };
 
 //----------------------------------------------------------------------------------------
@@ -57,6 +72,19 @@ class Coordinates {
   bool is_general_relativistic = false;
   bool is_dynamical_relativistic = false;
 
+  // Logical-Cartesian coordinate system (cartesian or spherical_shell). Set from the
+  // <coord> block in the input file. spherical_shell coordinates require the
+  // companion shell_geom container below.
+  CoordinateSystem coord_system = CoordinateSystem::cartesian;
+
+  // Spherical-polar shell geometry (only populated when coord_system == spherical_shell).
+  // Holds device-resident Kokkos Views of all finite-volume factors. Capture by value
+  // into kernels.
+  SphericalShellGeom shell_geom;
+
+  // Radial-grid selection. Default is uniform (matches Task 1-3B behaviour).
+  RadialGridType radial_grid = RadialGridType::uniform;
+
   // data needed to compute metric in GR
   CoordData coord_data;
 
@@ -69,6 +97,17 @@ class Coordinates {
                      DvceArray5D<Real> &u0);
   void CoordSrcTerms(const DvceArray5D<Real> &w0, const DvceArray5D<Real> &bcc,
                      const EOS_Data &eos, const Real dt, DvceArray5D<Real> &u0);
+
+  // Spherical-shell geometric source terms for Newtonian hydro. Uses primitives
+  // (w0) and the radial/theta Riemann fluxes to assemble Athena++'s flux-weighted
+  // (-rho v_r v_t / r) etc. terms. See coordinates/spherical_shell_srcterms.cpp.
+  void AddSphericalShellHydroSrcTerms(const DvceArray5D<Real> &w0,
+                                      const DvceArray5D<Real> &flx1,
+                                      const DvceArray5D<Real> &flx2,
+                                      const EOS_Data &eos,
+                                      const Real dt,
+                                      DvceArray5D<Real> &u0);
+
   void SetExcisionMasks(DvceArray4D<bool> &floor, DvceArray4D<bool> &flux);
 
   void UpdateExcisionMasks();

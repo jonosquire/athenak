@@ -16,6 +16,8 @@
 #include "athena.hpp"
 #include "coordinates/cartesian_ks.hpp"
 #include "coordinates/cell_locations.hpp"
+#include "coordinates/coordinates.hpp"
+#include "coordinates/spherical_shell.hpp"
 #include "eos/eos.hpp"
 #include "geodesic-grid/geodesic_grid.hpp"
 //#include "hydro/hydro.hpp"
@@ -40,6 +42,7 @@ SourceTerms::SourceTerms(std::string block, MeshBlockPack *pp, ParameterInput *p
   ism_cooling = pin->GetOrAddBoolean(block, "ism_cooling", false);
   rel_cooling = pin->GetOrAddBoolean(block, "rel_cooling", false);
   rad_beam = pin->GetOrAddBoolean(block, "rad_beam", false);
+  r_inv_sq_gravity = pin->GetOrAddBoolean(block, "r_inv_sq_gravity", false);
 
   // (1) read data for (constant) gravitational acceleration
   if (const_accel) {
@@ -63,7 +66,20 @@ SourceTerms::SourceTerms(std::string block, MeshBlockPack *pp, ParameterInput *p
     cpower_rel = pin->GetOrAddReal(block, "cpower_rel", 1.);
   }
 
-  // (4) radiation beam source (radiation)
+  // (4a) radial inverse-square gravity (spherical_shell only).
+  // Reads GM as <block>/r_inv_sq_gm.
+  if (r_inv_sq_gravity) {
+    r_inv_sq_gm = pin->GetReal(block, "r_inv_sq_gm");
+    if (pmy_pack->pcoord->coord_system != CoordinateSystem::spherical_shell) {
+      std::cout << "### FATAL ERROR in " << __FILE__ << " at line " << __LINE__
+                << std::endl
+                << "r_inv_sq_gravity requires <coord>/system = spherical_shell"
+                << std::endl;
+      std::exit(EXIT_FAILURE);
+    }
+  }
+
+  // (5) radiation beam source (radiation)
   if (rad_beam) {
     dii_dt = pin->GetReal(block, "dii_dt");
     pos1 = pin->GetReal(block, "pos_1");
@@ -92,6 +108,7 @@ void SourceTerms::ApplySrcTerms(const DvceArray5D<Real> &w0, const EOS_Data &eos
                                 const Real bdt, DvceArray5D<Real> &u0) {
   // NOTE source terms must be computed using primitive (w0) and NOT conserved (u0) vars
   if (const_accel) ConstantAccel(w0, eos_data,  bdt, u0);
+  if (r_inv_sq_gravity) RInvSqGravity(w0, eos_data, bdt, u0);
   if (ism_cooling) ISMCooling(w0, eos_data, bdt, u0);
   if (rel_cooling) RelCooling(w0, eos_data, bdt, u0);
   return;
@@ -125,6 +142,40 @@ void SourceTerms::ConstantAccel(const DvceArray5D<Real> &w0, const EOS_Data &eos
     if (eos_data.is_ideal) { u0(m,IEN,k,j,i) += src*w0(m,dir,k,j,i); }
   });
 
+  return;
+}
+
+//----------------------------------------------------------------------------------------
+//! \fn SourceTerms::RInvSqGravity
+//! \brief Add radial inverse-square gravity in spherical_shell coordinates:
+//!   S(m_r) = - rho * GM / r^2
+//!   S(E)   = - rho * v_r * GM / r^2 (when energy is evolved)
+//! No theta/phi momentum source. Uses the volume-averaged cell-centred radius
+//! from SphericalShellGeom (Mignone-2014).
+
+void SourceTerms::RInvSqGravity(const DvceArray5D<Real> &w0,
+                                const EOS_Data &eos_data,
+                                const Real bdt, DvceArray5D<Real> &u0) {
+  auto &indcs = pmy_pack->pmesh->mb_indcs;
+  int is = indcs.is, ie = indcs.ie;
+  int js = indcs.js, je = indcs.je;
+  int ks = indcs.ks, ke = indcs.ke;
+  int nmb1 = pmy_pack->nmb_thispack - 1;
+
+  const Real gm = r_inv_sq_gm;
+  auto geom = pmy_pack->pcoord->shell_geom;
+  const bool is_ideal = eos_data.is_ideal;
+
+  par_for("r_inv_sq_grav", DevExeSpace(), 0, nmb1, ks, ke, js, je, is, ie,
+  KOKKOS_LAMBDA(const int m, const int k, const int j, const int i) {
+    Real r = geom.r_vol(m, i);
+    Real g_r = -gm / (r * r);
+    Real src = bdt * g_r * w0(m, IDN, k, j, i);
+    u0(m, IM1, k, j, i) += src;
+    if (is_ideal) {
+      u0(m, IEN, k, j, i) += src * w0(m, IVX, k, j, i);
+    }
+  });
   return;
 }
 

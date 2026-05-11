@@ -54,6 +54,11 @@ class ProblemGenerator {
   UserRefinementFnPtr user_ref_func=nullptr;
   UserHistoryFnPtr user_hist_func=nullptr;
 
+  // For spherical_shell radial_grid=user, register the host-side mapping via
+  // SetUserRadialGridFunc() in coordinates/spherical_shell.hpp from a static
+  // initializer in the pgen translation unit. UserProblem() runs after
+  // Coordinates is constructed and is too late.
+
   // predefined problem generator functions (default test suite)
   void CallProblemGenerator(ParameterInput *pin, bool is_restart);
   void Advection(ParameterInput *pin, const bool restart);

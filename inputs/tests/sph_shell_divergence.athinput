@@ -1,0 +1,68 @@
+# AthenaK input: spherical-shell FV divergence-operator diagnostic.
+# Evaluates the discrete FV divergence operator against analytic div(F) for
+# three vector fields:
+#   case 1: F_r = r^n        (default n=2)
+#   case 2: F_theta = sin theta
+#   case 3: F_phi = sin(m phi) (default m=2)
+# Errors are compared cell-by-cell to the *centroid* analytic divergence;
+# expected to be O(h^2) for smooth fields. Case 1 with n=1 yields exactly
+# div F = 3 (constant); the FV operator agrees to roundoff in that limit.
+# Resolution can be varied at the command line:
+#   meshblock/nx1=64 meshblock/nx2=32 meshblock/nx3=32 mesh/nx1=64 ...
+# Build with -DPROBLEM=sph_shell_hydro.
+
+<comment>
+problem   = sph_shell_hydro / divergence_test
+
+<job>
+basename  = SphShellDiv
+
+<mesh>
+nghost    = 2
+
+nx1       = 32
+x1min     = 1.0
+x1max     = 2.0
+ix1_bc    = outflow
+ox1_bc    = outflow
+
+nx2       = 16
+x2min     = 0.7853981633974483    # pi/4
+x2max     = 2.356194490192345     # 3*pi/4
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 16
+x3min     = 0.0
+x3max     = 1.5707963267948966    # pi/2
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 32
+nx2       = 16
+nx3       = 16
+
+<coord>
+system          = spherical_shell
+verify_geometry = false
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = 0
+tlim       = 1.0
+
+<hydro>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hllc
+gamma           = 1.6666666666666667
+
+<problem>
+mode      = divergence_test
+rho0      = 1.0
+p0        = 1.0
+div_n_exp = 2
+div_m_phi = 2

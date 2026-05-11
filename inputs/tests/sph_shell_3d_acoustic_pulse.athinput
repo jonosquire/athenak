@@ -1,0 +1,89 @@
+# AthenaK input: spherical-shell 3D localized acoustic pulse (vibe check).
+#
+# Initialises a Gaussian pressure/density perturbation centred at the
+# embedded Cartesian point (x0, y0, z0):
+#   delta_p   = A * p0 * exp(-d^2 / (2 sigma^2))
+#   delta_rho = delta_p / cs^2
+#   v = 0
+# where d = |x - x0| with x = (r sin theta cos phi, r sin theta sin phi, r cos theta).
+#
+# Expected visual behaviour (plot snapshots of rho or pressure):
+#   - in embedded physical space the wavefront should be a nearly spherical
+#     shell expanding at the sound speed cs0;
+#   - small amplitudes guarantee linear regime; coordinate-grid imprinting
+#     or wrong angular metric factors would show up as strong asymmetry;
+#   - outflow boundaries are placed far from the pulse so late-time
+#     reflections do not dominate, but ignore data once the front nears them.
+#
+# Plot suggestion: VTK slices through (z=z0), (x=x0), (y=y0) at t=0, 0.1, 0.2,
+# 0.3 (cs0=1 so radii ~0.1, 0.2, 0.3 from the pulse centre). Distance from
+# pulse centre and front radius should match cs0 * t.
+
+<comment>
+problem   = sph_shell_hydro / pulse_3d
+
+<job>
+basename  = SphShellPulse3D
+
+<mesh>
+nghost    = 2
+
+nx1       = 64
+x1min     = 1.0
+x1max     = 3.0
+ix1_bc    = outflow
+ox1_bc    = outflow
+
+nx2       = 64
+x2min     = 0.7853981633974483    # pi/4
+x2max     = 2.356194490192345     # 3*pi/4
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 64
+x3min     = -0.7853981633974483   # -pi/4
+x3max     =  0.7853981633974483   #  pi/4
+ix3_bc    = outflow
+ox3_bc    = outflow
+
+<meshblock>
+nx1       = 64
+nx2       = 64
+nx3       = 64
+
+<coord>
+system    = spherical_shell
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = -1
+tlim       = 0.3
+
+<hydro>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hllc
+gamma           = 1.6666666666666667
+
+<output1>
+file_type   = vtk
+variable    = hydro_w
+dt          = 0.05
+ghost_zones = false
+
+<output2>
+file_type   = hst
+data_format = %12.5e
+dt          = 0.02
+
+<problem>
+mode  = pulse_3d
+rho0  = 1.0
+p0    = 0.6              # cs0 = 1.0
+amp   = 1.0e-3           # delta_p / p0 amplitude
+sigma = 0.1              # Gaussian width
+x0    = 2.0              # pulse centre (embedded Cartesian)
+y0    = 0.0
+z0    = 0.0

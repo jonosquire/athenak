@@ -1,0 +1,83 @@
+# AthenaK input: spherical-shell radial acoustic propagation test.
+# Initialises an outgoing-going acoustic Gaussian on a uniform background:
+#   delta_rho = A rho0 exp[-(r-rc)^2/(2 sigma^2)]
+#   delta_p   = cs^2 delta_rho
+#   v_r       = + delta_p/(rho0 cs)       (so the IC is mostly outgoing)
+# At finalize the pgen prints the density-weighted radial centroid of the
+# outgoing wave and compares the propagation speed to cs0.
+#
+# Background gamma=5/3, rho0=1, p0=0.6 => cs0=1.0 (clean number for checks).
+# Domain is a thin theta/phi wedge so the result is essentially 1D radial.
+# Build with -DPROBLEM=sph_shell_hydro.
+#
+# Resolution can be doubled at the command line:
+#   mesh/nx1=256 meshblock/nx1=256
+# to study convergence (centroid error scales as O(h^2) for smooth ICs).
+
+<comment>
+problem   = sph_shell_hydro / radial_acoustic
+
+<job>
+basename  = SphShellRadAc
+
+<mesh>
+nghost    = 2
+
+nx1       = 128
+x1min     = 1.0
+x1max     = 4.0
+ix1_bc    = outflow
+ox1_bc    = outflow
+
+nx2       = 8
+x2min     = 1.4707963267948966   # pi/2 - 0.1
+x2max     = 1.6707963267948966   # pi/2 + 0.1
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 8
+x3min     = 0.0
+x3max     = 0.2
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 128
+nx2       = 8
+nx3       = 8
+
+<coord>
+system          = spherical_shell
+verify_geometry = false
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = -1
+tlim       = 1.0       # outgoing pulse should move from r=2.0 to r=3.0
+
+<hydro>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hllc
+gamma           = 1.6666666666666667
+
+<output1>
+file_type   = hst
+data_format = %12.5e
+dt          = 0.05
+
+<output2>
+file_type   = vtk
+variable    = hydro_w
+dt          = 0.1
+ghost_zones = false
+
+<problem>
+mode = radial_acoustic
+rho0 = 1.0
+p0   = 0.6        # cs0 = sqrt(gamma * p / rho) = 1.0
+amp  = 1.0e-4
+rc   = 2.0
+rw   = 0.1

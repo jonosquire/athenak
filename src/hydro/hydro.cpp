@@ -14,6 +14,7 @@
 #include "parameter_input.hpp"
 #include "mesh/mesh.hpp"
 #include "eos/eos.hpp"
+#include "coordinates/coordinates.hpp"
 #include "diffusion/viscosity.hpp"
 #include "diffusion/conduction.hpp"
 #include "srcterms/srcterms.hpp"
@@ -135,6 +136,13 @@ Hydro::Hydro(MeshBlockPack *ppack, ParameterInput *pin) :
   if (evolution_t.compare("stationary") != 0) {
     // determine if FOFC is enabled
     use_fofc = pin->GetOrAddBoolean("hydro","fofc",false);
+    if (use_fofc && pmy_pack->pcoord->coord_system ==
+                    CoordinateSystem::spherical_shell) {
+      std::cout << "### FATAL ERROR in " << __FILE__ << " at line " << __LINE__
+        << std::endl << "FOFC is not yet supported in spherical_shell coordinates."
+        << " Disable <hydro>/fofc or use <coord>/system=cartesian." << std::endl;
+      std::exit(EXIT_FAILURE);
+    }
 
     // select reconstruction method (default PLM)
     std::string xorder = pin->GetOrAddString("hydro","reconstruct","plm");

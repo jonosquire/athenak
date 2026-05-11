@@ -1,0 +1,94 @@
+# AthenaK input: spherical-shell oblique Cartesian wave-packet (vibe check).
+#
+# A linear acoustic wave packet defined in embedded Cartesian space and then
+# projected into the spherical orthonormal velocity basis. The wave-vector
+# kvec is intentionally NOT aligned with r, theta, or phi axes; this exercises
+# the theta and phi geometric source terms and the angular flux divergence in
+# the spherical FV update.
+#
+#   delta_rho     = A * rho0 * envelope(|x - x0|) * sin(kvec . (x - x0))
+#   delta_p       = cs^2 * delta_rho
+#   delta_v_cart  = (cs * delta_rho / rho0) * khat        (khat = kvec / |kvec|)
+#
+# delta_v_cart is then projected onto spherical orthonormal (e_r, e_theta, e_phi).
+#
+# Expected visual behaviour (plot snapshots of pressure or rho through e.g.
+# z = z0 in the embedded VTK output):
+#   - the wave packet should translate along khat at speed ~ cs0;
+#   - far from boundaries it should retain a coherent wave packet shape;
+#   - no obvious grid imprinting (radial spokes / theta rings / etc.).
+#
+# Late-time boundary reflections from the outflow BCs will contaminate the
+# answer; ignore data once the front has reached the boundaries.
+
+<comment>
+problem   = sph_shell_hydro / oblique_packet
+
+<job>
+basename  = SphShellObliq
+
+<mesh>
+nghost    = 2
+
+nx1       = 64
+x1min     = 1.0
+x1max     = 3.0
+ix1_bc    = outflow
+ox1_bc    = outflow
+
+nx2       = 64
+x2min     = 0.7853981633974483    # pi/4
+x2max     = 2.356194490192345     # 3*pi/4
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 64
+x3min     = -0.7853981633974483   # -pi/4
+x3max     =  0.7853981633974483   #  pi/4
+ix3_bc    = outflow
+ox3_bc    = outflow
+
+<meshblock>
+nx1       = 64
+nx2       = 64
+nx3       = 64
+
+<coord>
+system    = spherical_shell
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = -1
+tlim       = 0.4
+
+<hydro>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hllc
+gamma           = 1.6666666666666667
+
+<output1>
+file_type   = vtk
+variable    = hydro_w
+dt          = 0.05
+ghost_zones = false
+
+<output2>
+file_type   = hst
+data_format = %12.5e
+dt          = 0.02
+
+<problem>
+mode  = oblique_packet
+rho0  = 1.0
+p0    = 0.6
+amp   = 1.0e-4
+sigma = 0.20             # packet envelope width
+x0    = 2.0
+y0    = 0.0
+z0    = 0.0
+kx    = 6.0              # not aligned with r,theta,phi
+ky    = 4.0
+kz    = 3.0

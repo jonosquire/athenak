@@ -1,0 +1,73 @@
+# AthenaK input: spherical-shell homologous expansion diagnostic (optional).
+#
+# Initial state:
+#   rho = rho0 (const), v_r = H r, v_theta = v_phi = 0, p = p0
+# For an incompressible-velocity field with div(v) = 3 H, the density should
+# obey  d rho / dt = - rho * div(v) = -3 H rho   at t=0+.
+# After a short evolution we measure the volume-averaged <drho>/rho0 and
+# compare to the linear prediction -3 H t.
+#
+# This is a diagnostic of:
+#   (a) the angular metric factors entering the radial flux divergence in
+#       the FV update;
+#   (b) the geometric source terms (centripetal v_phi^2 etc. are zero here,
+#       but the radial pressure flux divergence acts).
+#
+# Use small H * tlim so the linearisation is meaningful and the velocity
+# does not blow density out of the domain.
+# Build with -DPROBLEM=sph_shell_hydro.
+
+<comment>
+problem   = sph_shell_hydro / homologous
+
+<job>
+basename  = SphShellHomol
+
+<mesh>
+nghost    = 2
+
+nx1       = 64
+x1min     = 1.0
+x1max     = 2.0
+ix1_bc    = outflow
+ox1_bc    = outflow
+
+nx2       = 16
+x2min     = 1.4707963267948966   # pi/2 - 0.1
+x2max     = 1.6707963267948966
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 16
+x3min     = 0.0
+x3max     = 0.2
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 64
+nx2       = 16
+nx3       = 16
+
+<coord>
+system          = spherical_shell
+verify_geometry = false
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = -1
+tlim       = 0.005    # very short; H*tlim must be small
+
+<hydro>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hllc
+gamma           = 1.6666666666666667
+
+<problem>
+mode = homologous
+rho0 = 1.0
+p0   = 1.0
+H    = 0.01           # very small expansion rate

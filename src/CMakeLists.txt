@@ -30,6 +30,7 @@ add_executable(
         coordinates/adm.cpp
         coordinates/coordinates.cpp
         coordinates/excision.cpp
+        coordinates/spherical_shell.cpp
 
         diffusion/conduction.cpp
         diffusion/resistivity.cpp
