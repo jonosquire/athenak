@@ -1,0 +1,81 @@
+# AthenaK input: spherical-shell MHD radial Alfven WKB vibe / convergence check.
+#
+# Higher resolution and a carrier-modulated pulse (k_r > 0) so the wave has a
+# definable WAVELENGTH small compared to the radial domain -- testing geometric-
+# optics propagation, refraction, and (qualitatively) the radial compression
+# of the pulse envelope as v_A drops outward.
+#
+# Domain: r in [1, 10]. nx1 = 1024 so kr * dr << 1 inside the carrier.
+# Pulse starts narrow (sigma_r = 0.1) with k_r = 60 -> ~ 6 oscillations under
+# the envelope. Run until the pulse has reached r ~ 5.
+#
+# VTK output to inspect propagation visually:
+#   plot bcc3 (B_phi) and bcc1 (B_r) on an (r, phi) slice or 1D radial line
+#   to watch the pulse move outward, getting compressed/refracted as v_A ~ 1/r^2.
+#
+# Build with -DPROBLEM=sph_shell_mhd.
+
+<comment>
+problem   = sph_shell_mhd / radial_alfven (WKB vibe)
+
+<job>
+basename  = SphShellMHDAWVibe
+
+<mesh>
+nghost    = 2
+
+nx1       = 1024
+x1min     = 1.0
+x1max     = 10.0
+ix1_bc    = outflow
+ox1_bc    = outflow
+
+nx2       = 8
+x2min     = 1.4707963267948966
+x2max     = 1.6707963267948966
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 8
+x3min     = 0.0
+x3max     = 0.2
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 1024
+nx2       = 8
+nx3       = 8
+
+<coord>
+system          = spherical_shell
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = -1
+tlim       = 80.0
+
+<mhd>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hlld
+gamma           = 1.6666666666666667
+
+<output1>
+file_type   = vtk
+variable    = mhd_w_bcc
+dt          = 5.0
+ghost_zones = false
+
+<problem>
+mode    = radial_alfven
+rho0    = 1.0
+p0      = 0.1
+B0      = 0.5
+r_ref   = 1.0
+r_c     = 2.0
+sigma_r = 0.1
+eps     = 1.0e-3
+k_r     = 60.0        # carrier with wavelength 2*pi/k_r ~ 0.10

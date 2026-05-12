@@ -58,13 +58,9 @@ Coordinates::Coordinates(ParameterInput *pin, MeshBlockPack *ppack) :
                   << " dynamics in this fork." << std::endl;
         std::exit(EXIT_FAILURE);
       }
-      if (pin->DoesBlockExist("mhd")) {
-        std::cout << "### FATAL ERROR in " << __FILE__ << " at line "
-                  << __LINE__ << std::endl
-                  << "spherical_shell coordinates currently support hydro only;"
-                  << " MHD/CT integration is deferred to a later task." << std::endl;
-        std::exit(EXIT_FAILURE);
-      }
+      // MHD/CT support: see mhd_update.cpp, mhd_ct.cpp, mhd_newdt.cpp branches and
+      // AddSphericalShellMHDSrcTerms. Pole BCs, AMR/SMR, and FOFC under
+      // spherical_shell are still unsupported -- see hydro.cpp / mhd.cpp guards.
       // Radial grid selection (see SphericalShellGeom::RadialGridType).
       std::string rgrid =
           pin->GetOrAddString("spherical_shell", "radial_grid", "uniform");

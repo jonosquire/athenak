@@ -178,6 +178,39 @@ Real SphPhysWidth3(const SphericalShellGeom &g,
 }
 
 //----------------------------------------------------------------------------------------
+// Edge-length accessors for CT.
+//
+// In AthenaK's CT convention, the i,j,k indices of an edge match the indices of the
+// adjacent CELL whose lower-corner sits on that edge -- i.e. Edge1(m,k,j,i) is the
+// radial edge that runs from (i-1/2, j-1/2, k-1/2) toward (i+1/2, j-1/2, k-1/2). The
+// edge thus sits at theta-FACE j and phi-FACE k.
+//
+// Spherical-polar edge lengths (matches Athena++ srcpp/coordinates/spherical_polar.cpp):
+//   L1 = dr                                        -- radial edge
+//   L2 = r_face * dtheta                           -- theta edge
+//   L3 = r_face * sin(theta_face) * dphi           -- phi edge
+//
+// L1 depends only on i; L2 depends on (i, j); L3 depends on (i, j, k).
+
+KOKKOS_INLINE_FUNCTION
+Real SphEdge1Length(const SphericalShellGeom &g,
+                    int m, int /*k*/, int /*j*/, int i) {
+  return g.dr(m, i);
+}
+
+KOKKOS_INLINE_FUNCTION
+Real SphEdge2Length(const SphericalShellGeom &g,
+                    int m, int /*k*/, int j, int i) {
+  return g.r_face(m, i) * g.dtheta(m, j);
+}
+
+KOKKOS_INLINE_FUNCTION
+Real SphEdge3Length(const SphericalShellGeom &g,
+                    int m, int k, int j, int i) {
+  return g.r_face(m, i) * g.sin_theta_face(m, j) * g.dphi(m, k);
+}
+
+//----------------------------------------------------------------------------------------
 // Setup and diagnostics (host side).
 
 //! \brief Allocate and populate every Kokkos View in `geom` from MeshBlockPack metadata.

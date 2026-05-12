@@ -1,0 +1,83 @@
+# AthenaK input: spherical-shell MHD field-loop advection vibe check.
+#
+# Non-axisymmetric A_theta(r, phi) Gaussian loop centred at (r_c, phi_c) in
+# the equatorial wedge. Field is in the (r, phi) plane (B_theta=0). Background
+# velocity v_phi = Omega * r * sin(theta) = SOLID-BODY rotation around z.
+# The loop should rotate rigidly through phi without distortion.
+#
+# Note: without a balancing radial gravity this is not a true equilibrium --
+# the centrifugal force pushes fluid outward. We use small Omega and run for
+# a fraction of a rotation period so the bulk acceleration stays small.
+# This is a VIBE check: plot bcc1 (B_r) and bcc3 (B_phi) in an (r, phi) slice
+# at the equator and look for a clean rotating loop without numerical
+# distortion / grid-imprinting.
+#
+# Build with -DPROBLEM=sph_shell_mhd.
+
+<comment>
+problem   = sph_shell_mhd / loop_eq advect (vibe)
+
+<job>
+basename  = SphShellMHDLoopVibe
+
+<mesh>
+nghost    = 2
+
+nx1       = 128
+x1min     = 1.0
+x1max     = 3.0
+ix1_bc    = outflow
+ox1_bc    = outflow
+
+# Thin theta wedge straddling the equator (so the loop lives near theta=pi/2)
+nx2       = 16
+x2min     = 1.3707963267948966   # pi/2 - 0.2
+x2max     = 1.7707963267948966
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+# Full 2*pi in phi, periodic, so the loop can advect around continuously
+nx3       = 128
+x3min     = 0.0
+x3max     = 6.283185307179586
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 128
+nx2       = 16
+nx3       = 128
+
+<coord>
+system          = spherical_shell
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = -1
+tlim       = 25.13                # one full rotation period for Omega = 0.25
+
+<mhd>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hlld
+gamma           = 1.6666666666666667
+
+<output1>
+file_type   = vtk
+variable    = mhd_w_bcc
+dt          = 2.513                # 10 snapshots per rotation period
+ghost_zones = false
+
+<problem>
+mode     = loop_eq
+flavor   = advect
+rho0     = 1.0
+p0       = 1.0
+A0       = 1.0e-3
+rc       = 2.0
+phi_c    = 1.0                    # loop centre in phi
+sigma    = 0.30                   # 20+ cells across the loop -- PLM-resolvable
+Omega    = 0.25                   # quarter-speed -> less per-cell advection per dt
+                                  # T_rotation = 2*pi/Omega = 25.13

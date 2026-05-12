@@ -16,6 +16,8 @@
 #include "mesh/mesh.hpp"
 #include "driver/driver.hpp"
 #include "eos/eos.hpp"
+#include "coordinates/coordinates.hpp"
+#include "coordinates/spherical_shell.hpp"
 #include "mhd.hpp"
 #include "diffusion/conduction.hpp"
 #include "srcterms/srcterms.hpp"
@@ -47,6 +49,9 @@ TaskStatus MHD::NewTimeStep(Driver *pdriver, int stage) {
   auto &is_special_relativistic_ = pmy_pack->pcoord->is_special_relativistic;
   auto &is_general_relativistic_ = pmy_pack->pcoord->is_general_relativistic;
   auto &is_dynamical_relativistic_ = pmy_pack->pcoord->is_dynamical_relativistic;
+  const bool is_spherical = (pmy_pack->pcoord->coord_system ==
+                             CoordinateSystem::spherical_shell);
+  auto geom = pmy_pack->pcoord->shell_geom;
   const int nmkji = (pmy_pack->nmb_thispack)*nx3*nx2*nx1;
   const int nkji = nx3*nx2*nx1;
   const int nji  = nx2*nx1;
@@ -63,9 +68,19 @@ TaskStatus MHD::NewTimeStep(Driver *pdriver, int stage) {
       k += ks;
       j += js;
 
-      min_dt1 = fmin((mbsize.d_view(m).dx1/fabs(w0_(m,IVX,k,j,i))), min_dt1);
-      min_dt2 = fmin((mbsize.d_view(m).dx2/fabs(w0_(m,IVY,k,j,i))), min_dt2);
-      min_dt3 = fmin((mbsize.d_view(m).dx3/fabs(w0_(m,IVZ,k,j,i))), min_dt3);
+      Real ds1, ds2, ds3;
+      if (is_spherical) {
+        ds1 = geom.dr(m, i);
+        ds2 = geom.r_vol(m, i) * geom.dtheta(m, j);
+        ds3 = geom.r_vol(m, i) * geom.sin_theta_vol(m, j) * geom.dphi(m, k);
+      } else {
+        ds1 = mbsize.d_view(m).dx1;
+        ds2 = mbsize.d_view(m).dx2;
+        ds3 = mbsize.d_view(m).dx3;
+      }
+      min_dt1 = fmin((ds1/fabs(w0_(m,IVX,k,j,i))), min_dt1);
+      min_dt2 = fmin((ds2/fabs(w0_(m,IVY,k,j,i))), min_dt2);
+      min_dt3 = fmin((ds3/fabs(w0_(m,IVZ,k,j,i))), min_dt3);
     }, Kokkos::Min<Real>(dt1), Kokkos::Min<Real>(dt2),Kokkos::Min<Real>(dt3));
   } else {
     // find smallest dx/(v +/- Cf) in each direction for mhd problems
@@ -142,9 +157,19 @@ TaskStatus MHD::NewTimeStep(Driver *pdriver, int stage) {
         }
       }
 
-      min_dt1 = fmin((mbsize.d_view(m).dx1/max_dv1), min_dt1);
-      min_dt2 = fmin((mbsize.d_view(m).dx2/max_dv2), min_dt2);
-      min_dt3 = fmin((mbsize.d_view(m).dx3/max_dv3), min_dt3);
+      Real ds1, ds2, ds3;
+      if (is_spherical) {
+        ds1 = geom.dr(m, i);
+        ds2 = geom.r_vol(m, i) * geom.dtheta(m, j);
+        ds3 = geom.r_vol(m, i) * geom.sin_theta_vol(m, j) * geom.dphi(m, k);
+      } else {
+        ds1 = mbsize.d_view(m).dx1;
+        ds2 = mbsize.d_view(m).dx2;
+        ds3 = mbsize.d_view(m).dx3;
+      }
+      min_dt1 = fmin((ds1/max_dv1), min_dt1);
+      min_dt2 = fmin((ds2/max_dv2), min_dt2);
+      min_dt3 = fmin((ds3/max_dv3), min_dt3);
     }, Kokkos::Min<Real>(dt1), Kokkos::Min<Real>(dt2),Kokkos::Min<Real>(dt3));
   }
 

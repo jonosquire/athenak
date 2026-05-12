@@ -100,13 +100,27 @@ class Coordinates {
 
   // Spherical-shell geometric source terms for Newtonian hydro. Uses primitives
   // (w0) and the radial/theta Riemann fluxes to assemble Athena++'s flux-weighted
-  // (-rho v_r v_t / r) etc. terms. See coordinates/spherical_shell_srcterms.cpp.
+  // (-rho v_r v_t / r) etc. terms. See coordinates/spherical_shell.cpp.
   void AddSphericalShellHydroSrcTerms(const DvceArray5D<Real> &w0,
                                       const DvceArray5D<Real> &flx1,
                                       const DvceArray5D<Real> &flx2,
                                       const EOS_Data &eos,
                                       const Real dt,
                                       DvceArray5D<Real> &u0);
+
+  // MHD overload: extends hydro source terms with magnetic-stress contributions.
+  //   m_ii += B_r^2
+  //   m_pp += 0.5 (B_r^2 + B_t^2 - B_p^2)
+  //   1D-theta fallback m_ph -= B_t * B_p
+  // flx1/flx2 are the MHD Riemann fluxes (already include -B_i B_j stress).
+  // See Athena++ srcpp/coordinates/spherical_polar.cpp::AddCoordTermsDivergence.
+  void AddSphericalShellMHDSrcTerms(const DvceArray5D<Real> &w0,
+                                    const DvceArray5D<Real> &bcc,
+                                    const DvceArray5D<Real> &flx1,
+                                    const DvceArray5D<Real> &flx2,
+                                    const EOS_Data &eos,
+                                    const Real dt,
+                                    DvceArray5D<Real> &u0);
 
   void SetExcisionMasks(DvceArray4D<bool> &floor, DvceArray4D<bool> &flux);
 

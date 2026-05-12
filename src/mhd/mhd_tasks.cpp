@@ -269,6 +269,15 @@ TaskStatus MHD::MHDSrcTerms(Driver *pdrive, int stage) {
     pmy_pack->pdyngr->AddCoordTerms(w0, bcc0, beta_dt, u0, pmy_pack->pmesh->mb_indcs.ng);
   }
 
+  // Newtonian spherical-shell geometric MHD source terms. Uses primitives w0, bcc0
+  // (cell-centred B from beginning of stage) and the radial/theta Riemann fluxes
+  // (uflx) computed in this stage's Fluxes(). Mirrors Athena++
+  // spherical_polar.cpp::AddCoordTermsDivergence MHD path.
+  if (pmy_pack->pcoord->coord_system == CoordinateSystem::spherical_shell) {
+    pmy_pack->pcoord->AddSphericalShellMHDSrcTerms(
+        w0, bcc0, uflx.x1f, uflx.x2f, peos->eos_data, beta_dt, u0);
+  }
+
   // Add user source terms
   if (pmy_pack->pmesh->pgen->user_srcs) {
     (pmy_pack->pmesh->pgen->user_srcs_func)(pmy_pack->pmesh, beta_dt);

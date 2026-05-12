@@ -14,6 +14,7 @@
 # --- Whitelist tracked top-level entries -------------------------------------
 !/.git*
 !/AGENTS.md
+!/CLAUDE.md
 !/CMakeLists.txt
 !/CODE_OF_CONDUCT.md
 !/CONTRIBUTING.md

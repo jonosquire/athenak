@@ -505,3 +505,95 @@ void Coordinates::AddSphericalShellHydroSrcTerms(
     }
   });
 }
+
+//----------------------------------------------------------------------------------------
+//! \fn Coordinates::AddSphericalShellMHDSrcTerms
+//! \brief Newtonian MHD geometric source terms for spherical-shell coordinates.
+//! Identical in structure to the hydro version but with magnetic-stress contributions
+//! from the cell-centred field bcc (orthonormal spherical components). The radial- and
+//! theta-flux pairings use the FULL MHD Riemann fluxes flx1/flx2 (which already include
+//! the -B_i B_j magnetic-stress pieces), so no extra B-only flux terms are needed in
+//! the pairings. Energy IEN has no geometric source.
+//!
+//! Mirrors Athena++ srcpp/coordinates/spherical_polar.cpp::AddCoordTermsDivergence
+//! MHD path (NON_BAROTROPIC + MAGNETIC_FIELDS_ENABLED branches).
+//!
+//! Indexing: bcc(m, IBX/IBY/IBZ, k, j, i) holds B_r, B_theta, B_phi at cell centres.
+
+void Coordinates::AddSphericalShellMHDSrcTerms(
+    const DvceArray5D<Real> &w0,
+    const DvceArray5D<Real> &bcc,
+    const DvceArray5D<Real> &flx1,
+    const DvceArray5D<Real> &flx2,
+    const EOS_Data &eos,
+    const Real dt,
+    DvceArray5D<Real> &u0) {
+  if (coord_system != CoordinateSystem::spherical_shell) return;
+
+  auto &indcs = pmy_pack->pmesh->mb_indcs;
+  const int is = indcs.is, ie = indcs.ie;
+  const int js = indcs.js, je = indcs.je;
+  const int ks = indcs.ks, ke = indcs.ke;
+  const int nmb1 = pmy_pack->nmb_thispack - 1;
+  const bool multi_d = pmy_pack->pmesh->multi_d;
+  const bool is_ideal = eos.is_ideal;
+  const Real iso_cs = eos.iso_cs;
+  auto geom = shell_geom;
+
+  par_for("sph_mhd_geom_src", DevExeSpace(),
+          0, nmb1, ks, ke, js, je, is, ie,
+  KOKKOS_LAMBDA(const int m, const int k, const int j, const int i) {
+    const Real rho = w0(m, IDN, k, j, i);
+    const Real vr  = w0(m, IM1, k, j, i);
+    const Real vt  = w0(m, IM2, k, j, i);
+    const Real vp  = w0(m, IM3, k, j, i);
+    const Real pgas = is_ideal ? eos.IdealGasPressure(w0(m, IEN, k, j, i))
+                               : (iso_cs * iso_cs) * rho;
+    const Real br  = bcc(m, IBX, k, j, i);
+    const Real bt  = bcc(m, IBY, k, j, i);
+    const Real bp  = bcc(m, IBZ, k, j, i);
+
+    const Real src1_i = geom.coord_src1_i(m, i);
+    const Real src2_i = geom.coord_src2_i(m, i);
+    const Real src1_j = geom.coord_src1_j(m, j);
+    const Real src2_j = geom.coord_src2_j(m, j);
+    const Real r2m = geom.r2_face(m, i);
+    const Real r2p = geom.r2_face(m, i+1);
+
+    // (i) Radial centripetal + pressure-curvature source on m_r.
+    //   Hydro:  rho (v_t^2 + v_p^2) + 2 p
+    //   MHD +=  B_r^2                                  (Athena++)
+    Real m_ii = rho * (vt*vt + vp*vp) + 2.0 * pgas + br*br;
+    u0(m, IM1, k, j, i) += dt * src1_i * m_ii;
+
+    // (ii) Radial-flux pairings for theta and phi momentum.
+    //   MHD Riemann fluxes include -B_r B_t / -B_r B_p stress contributions,
+    //   so the pairing form is identical to the hydro form.
+    u0(m, IM2, k, j, i) -= dt * src2_i *
+                          (r2m * flx1(m, IM2, k, j, i)
+                         + r2p * flx1(m, IM2, k, j, i+1));
+    u0(m, IM3, k, j, i) -= dt * src2_i *
+                          (r2m * flx1(m, IM3, k, j, i)
+                         + r2p * flx1(m, IM3, k, j, i+1));
+
+    // (iii) Cotangent + pressure-curvature source on m_t.
+    //   Hydro:  rho v_p^2 + p
+    //   MHD +=  0.5 ( B_r^2 + B_t^2 - B_p^2 )           (Athena++)
+    Real m_pp = rho * vp * vp + pgas
+              + 0.5 * (br*br + bt*bt - bp*bp);
+    u0(m, IM2, k, j, i) += dt * src1_i * src1_j * m_pp;
+
+    // (iv) Theta-direction advection of phi momentum.
+    if (multi_d) {
+      const Real sm = geom.sin_theta_face(m, j);
+      const Real sp = geom.sin_theta_face(m, j+1);
+      u0(m, IM3, k, j, i) -= dt * src1_i * src2_j *
+                            (sm * flx2(m, IM3, k, j,   i)
+                           + sp * flx2(m, IM3, k, j+1, i));
+    } else {
+      // 1D-theta fallback: subtract <cot/r>*(rho v_t v_p - B_t B_p).
+      Real m_ph = rho * vt * vp - bt * bp;
+      u0(m, IM3, k, j, i) -= dt * src1_i * src1_j * m_ph;
+    }
+  });
+}

@@ -1,0 +1,62 @@
+# AthenaK input: spherical-shell MHD monopole divergence test on log-r grid.
+# Verifies that the CT geometry factors (face areas, edge lengths) and the
+# divB diagnostic work consistently on a stretched radial grid.
+# Build with -DPROBLEM=sph_shell_mhd.
+
+<comment>
+problem   = sph_shell_mhd / monopole (log-r)
+
+<job>
+basename  = SphShellMHDMonoLogr
+
+<mesh>
+nghost    = 2
+
+nx1       = 64
+x1min     = 1.0
+x1max     = 10.0                  # one decade in r => significant stretching
+ix1_bc    = outflow
+ox1_bc    = outflow
+
+nx2       = 32
+x2min     = 0.5235987755982988    # pi/6
+x2max     = 2.617993877991494
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 16
+x3min     = 0.0
+x3max     = 1.5707963267948966    # pi/2
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 64
+nx2       = 32
+nx3       = 16
+
+<coord>
+system          = spherical_shell
+
+<spherical_shell>
+radial_grid = log
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = 20
+tlim       = 100.0
+
+<mhd>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hlld
+gamma           = 1.6666666666666667
+
+<problem>
+mode  = monopole
+rho0  = 1.0
+p0    = 1.0
+B0    = 1.0
+r_ref = 1.0

@@ -1,0 +1,68 @@
+# AthenaK input: spherical-shell MHD radial-monopole divergence test (uniform-r).
+# IC: rho=const, p=const, v=0, B_r = B0 * (r_ref / r)^2 on radial faces, B_t=B_p=0.
+# A1 * B1 is independent of i by construction, so divB is identically zero in the
+# radial direction. The finalize routine prints volume-averaged divB metrics and
+# max deviation of B1f from the analytic 1/r^2 profile.
+# nlim>0 also exercises the CT update with zero EMF.
+# Build with -DPROBLEM=sph_shell_mhd.
+
+<comment>
+problem   = sph_shell_mhd / monopole (uniform-r)
+
+<job>
+basename  = SphShellMHDMonoUniform
+
+<mesh>
+nghost    = 2
+
+nx1       = 64
+x1min     = 1.0
+x1max     = 3.0
+ix1_bc    = outflow
+ox1_bc    = outflow
+
+nx2       = 32
+x2min     = 0.5235987755982988    # pi/6
+x2max     = 2.617993877991494     # 5*pi/6
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 16
+x3min     = 0.0
+x3max     = 1.5707963267948966    # pi/2
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 64
+nx2       = 32
+nx3       = 16
+
+<coord>
+system          = spherical_shell
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = 20
+tlim       = 100.0
+
+<mhd>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hlld
+gamma           = 1.6666666666666667
+
+<output1>
+file_type   = vtk
+variable    = mhd_w_bcc
+dt          = 1.0
+ghost_zones = false
+
+<problem>
+mode  = monopole
+rho0  = 1.0
+p0    = 1.0
+B0    = 1.0
+r_ref = 1.0

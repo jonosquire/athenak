@@ -1,0 +1,58 @@
+# AthenaK input: spherical-shell MHD uniform-state preservation (B=0).
+# Identical role to the hydro uniform test, but exercising the MHD code path
+# (CT, MHD update, MHD CFL, MHD source terms) with vanishing magnetic field.
+# Should preserve rho, p, v exactly to roundoff.
+# Build with -DPROBLEM=sph_shell_mhd.
+
+<comment>
+problem   = sph_shell_mhd / uniform_static
+
+<job>
+basename  = SphShellMHDUniform
+
+<mesh>
+nghost    = 2
+
+nx1       = 32
+x1min     = 1.0
+x1max     = 2.0
+ix1_bc    = outflow
+ox1_bc    = outflow
+
+nx2       = 16
+x2min     = 0.7853981633974483    # pi/4
+x2max     = 2.356194490192345     # 3*pi/4
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 8
+x3min     = 0.0
+x3max     = 1.5707963267948966    # pi/2
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 32
+nx2       = 16
+nx3       = 8
+
+<coord>
+system          = spherical_shell
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = 20
+tlim       = 10.0
+
+<mhd>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hlld
+gamma           = 1.6666666666666667
+
+<problem>
+mode = uniform_static
+rho0 = 1.0
+p0   = 1.0

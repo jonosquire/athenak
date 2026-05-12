@@ -10,24 +10,29 @@ task summaries, see `AGENTS.md` in the repo root.
 
 **Purpose.** This fork adds a specialised logically-Cartesian spherical-polar
 shell (`x1=r`, `x2=θ`, `x3=φ`, pole excised) to AthenaK for solar-corona
-research. Hydro only. GPU-native via Kokkos. Cartesian behaviour is unchanged.
+research. Hydro **and MHD** with constrained transport. GPU-native via
+Kokkos. Cartesian behaviour is unchanged.
 
-**What has been added (cumulative, Tasks 1 → 3C):**
+**What has been added (cumulative, Tasks 1 → 4):**
 
 | Area                          | Status                                                    |
 |-------------------------------|-----------------------------------------------------------|
-| Spherical-shell geometry      | volumes, face areas, widths, Mignone centroids            |
+| Spherical-shell geometry      | volumes, face areas, widths, Mignone centroids, edge lengths |
 | Hydro FV update               | area-weighted flux divergence using `SphericalShellGeom`  |
 | Hydro CFL                     | physical widths `(dr, r·dθ, r·sinθ·dφ)`                  |
 | Geometric momentum sources    | Athena++ `spherical_polar.cpp::AddCoordTermsDivergence`   |
 | Gravity                       | constant-g (existing AthenaK) + 1/r² (new `RInvSqGravity`) |
 | Radial grid options           | uniform / log / power_law / user (Task 3C)                |
-| Validation suites             | 3A (FV+wave), 3B (gravity+rotation), 3C (log-r)           |
+| MHD FV update                 | same area/volume weighting as hydro (Task 4)              |
+| MHD CFL                       | spherical widths + fast magnetosonic speed (Task 4)       |
+| MHD geometric source terms    | Athena++ MHD path with B² stress (Task 4)                 |
+| Constrained transport (CT)    | discrete Stokes loop with edge lengths + face areas (Task 4) |
+| divB diagnostic               | face-area-weighted FV form (Task 4)                       |
+| Validation suites             | 3A/3B/3C (hydro) + 4 (MHD: monopole, uniform, toroidal)   |
 
 **What is deliberately unsupported.**
-- MHD / CT (face-centred B field on a spherical grid)
-- AMR / SMR
-- FOFC with `spherical_shell` (errored out at construction)
+- AMR / SMR (CT prolongation/restriction on a spherical grid not implemented)
+- FOFC with `spherical_shell` (errored out at construction for both hydro and MHD)
 - Pole-aware boundary conditions (user must keep `θ_min > 0`, `θ_max < π`)
 - Nonuniform θ or φ grids (only radial nonuniformity supported)
 - GPU performance testing (kernels are Kokkos-portable but only CPU/Serial
@@ -379,12 +384,161 @@ Expected outcomes:
 
 ---
 
+## 6b. MHD / constrained transport (Task 4)
+
+Spherical-shell MHD with constrained transport is implemented in:
+
+- `src/mhd/mhd_update.cpp`, `mhd_ct.cpp`, `mhd_newdt.cpp` — host-level branch on
+  `coord_system`, identical Cartesian path preserved; spherical branch uses
+  `SphericalShellGeom` face areas, cell volumes, and (for CT) edge lengths.
+- `src/coordinates/spherical_shell.cpp::Coordinates::AddSphericalShellMHDSrcTerms` —
+  geometric MHD source terms (Athena++
+  `srcpp/coordinates/spherical_polar.cpp::AddCoordTermsDivergence` MHD path).
+- `src/pgen/sph_shell_mhd.cpp` — MHD pgen with `monopole` / `uniform_static` /
+  `toroidal_static` modes and a face-area-weighted `divB` diagnostic that uses
+  the SAME `SphericalShellGeom` factors as CT.
+
+### What is implemented
+
+- Spherical FV update for cell-centred conserved variables (rho, momenta,
+  energy, scalars). Same area/volume weighting as hydro.
+- CT update for face-centred B fields via the discrete Stokes loop:
+  ```
+  dB1/dt = -(1/A1) [L3+ E3+ - L3- E3-] + (1/A1) [L2+ E2+ - L2- E2-]
+  dB2/dt = +(1/A2) [L3+ E3+ - L3- E3-] - (1/A2) [L1+ E1+ - L1- E1-]
+  dB3/dt = -(1/A3) [L2+ E2+ - L2- E2-] + (1/A3) [L1+ E1+ - L1- E1-]
+  ```
+  with face areas A_i and edge lengths L_i from `SphericalShellGeom`.
+- MHD CFL using spherical physical widths (`dr, r·dθ, r·sin θ·dφ`) and the
+  existing MHD fast-magnetosonic speed.
+- Geometric source terms extending the hydro form with magnetic-stress pieces:
+  ```
+  m_ii_MHD = ρ(v_θ² + v_φ²) + 2p + B_r²
+  m_pp_MHD = ρ·v_φ² + p + ½(B_r² + B_θ² - B_φ²)
+  m_ph_MHD = ρ·v_θ·v_φ - B_θ·B_φ          (1-D-theta fallback only)
+  ```
+  Radial- and theta-flux pairings use the MHD Riemann fluxes (which already
+  include `-B_i B_j` magnetic stress). No `IEN` geometric source (matches
+  Athena++ split).
+- `divB` diagnostic in the MHD pgen using the same face-area FV form:
+  ```
+  divB = (1/V) [A1+ B1+ - A1- B1- + A2+ B2+ - A2- B2- + A3+ B3+ - A3- B3-]
+  ```
+
+### Edge-length / face-area conventions
+
+Match Athena++ `srcpp/coordinates/spherical_polar.cpp` exactly:
+
+| Quantity              | Formula                                         |
+|-----------------------|-------------------------------------------------|
+| A1 (radial face area) | `r_face^2 * (cos θ_- - cos θ_+) * dφ`           |
+| A2 (theta face area)  | `½(r_+² - r_-²) * sin(θ_face) * dφ`             |
+| A3 (phi face area)    | `½(r_+² - r_-²) * dθ`                            |
+| L1 (radial edge)      | `dr`                                             |
+| L2 (theta edge)       | `r_face * dθ`                                    |
+| L3 (phi edge)         | `r_face * sin(θ_face) * dφ`                      |
+
+`L1` depends only on `i`; `L2` on `(i, j)`; `L3` on `(i, j, k)`. The CT kernel
+factors out edge lengths that don't vary across the relevant difference.
+
+### MHD tests
+
+| Input file                                       | mode / flavor      | what it tests                                      |
+|--------------------------------------------------|--------------------|----------------------------------------------------|
+| `sph_shell_mhd_uniform_static.athinput`          | uniform_static     | MHD code path with B=0: should be exact            |
+| `sph_shell_mhd_monopole.athinput`                | monopole           | divB preservation for radial 1/r² field (uniform-r) |
+| `sph_shell_mhd_monopole_logr.athinput`           | monopole           | same, log-r grid                                    |
+| `sph_shell_mhd_toroidal_static.athinput`         | toroidal_static    | divB preservation for axisymmetric B_φ              |
+| `sph_shell_mhd_radial_alfven.athinput`           | radial_alfven      | outgoing axisym Alfvén pulse on 1/r² monopole; WKB centroid + divB |
+| `sph_shell_mhd_radial_alfven_vibe.athinput`      | radial_alfven      | high-res WKB vibe: nx1=1024, carrier k_r=60, r∈[1,10], VTK dumps |
+| `sph_shell_mhd_loop_eq.athinput`                 | loop_eq / axisym   | axisymmetric A_φ Gaussian loop in (r,θ), v=0; CT field preservation |
+| `sph_shell_mhd_loop_eq_vibe.athinput`            | loop_eq / advect   | non-axisym A_θ loop in (r,φ), solid-body Ω=0.25; VTK rotation vibe |
+
+Run with `-DPROBLEM=sph_shell_mhd`. Each test reports:
+
+- `divB` L1, L2, Linf and a normalised `Linf · h / |B|max` metric.
+- Max `|v|/cs_iso` (should remain near roundoff for symmetric ICs; small
+  residual on the monopole due to the discrete force-free split).
+- Max `|B1f − analytic|` for the monopole, verifying CT preserves the field.
+
+### Quantitative CPU/Serial results
+
+Single block:
+
+```
+monopole (uniform-r) nlim=20:  divB L1=1.2e-15, Linf=1.7e-14, max|B1f-analytic|=1.1e-16
+monopole (log-r)     nlim=20:  divB L1=5.9e-16, Linf=1.2e-14, max|B1f-analytic|=1.1e-16
+toroidal_static      nlim=10:  divB L1=1.2e-17, Linf=9.3e-17
+uniform_static       nlim=20:  divB=0, max|v|=4.9e-17
+```
+
+Multi-block (4×2×2 = 16 blocks):
+
+```
+monopole (uniform-r) nlim=20:  divB L1=1.2e-15, Linf=1.5e-14, max|B1f-analytic|=1.1e-16
+monopole (log-r)     nlim=20:  divB L1=5.7e-16, Linf=1.7e-14, max|B1f-analytic|=2.2e-16
+```
+
+CT preserves divB at machine precision across MeshBlock boundaries on both
+uniform-r and log-r grids.
+
+The ~4% residual `max|v|/cs` on the radial monopole is **not** a CT bug. It
+comes from the discrete spherical FV / source-term split: cell-centred B²
+in the curvature source does not exactly cancel face-centred B² in the
+flux divergence for a 1/r² monopole. The same residual is present in
+Athena++. `divB` itself remains at machine precision throughout.
+
+**Radial Alfvén (`radial_alfven`)**, standard test (`tlim=5`, σ_r=0.3, nx1=256, r ∈ [1, 8]):
+```
+<r>_|dB|^2 = 2.200    r_WKB = 2.216   centroid err = -1.5e-2 (-2% of distance)
+peak |dB_phi|/(eps*B0) = 0.93     peak |dv_phi| = 4.4e-4
+divB L1 = 3.3e-15
+```
+Pulse propagates outward following the WKB ray to ~2%; divB at machine
+precision. Amplitude drop ~7% is PLM dissipation. The vibe variant
+(`*_vibe.athinput`) runs the same setup on r ∈ [1, 10] with nx1=1024 and
+a carrier wavelength λ ~ 0.1 for high-resolution geometric-optics
+inspection via VTK output.
+
+**Field loop (`loop_eq`)**, axisymmetric standard test (`v=0`, 50 cycles,
+nx1=nx2=64):
+```
+max|Br|      = 4.02e-3  (preserved to 13+ digits; max|Bphi| ~ 1e-18)
+max|Btheta|  = 4.31e-3
+0.5*B^2*V    = 6.26e-7   (preserved to 8 digits)
+divB L1      = 6.2e-18   Linf = 4.6e-16
+```
+CT keeps the closed poloidal loop static to machine precision under v=0.
+
+Vibe variant (`*_vibe.athinput`) uses a non-axisymmetric A_θ loop in (r, φ)
+on a full 2π annulus with solid-body rotation Ω=0.25. At quarter rotation
+the loop has translated 1.57 rad in φ as predicted; magnetic energy
+decays from numerical PLM dissipation (factor ~3.5 at quarter period at
+nx3=128 resolution -- ramps up with resolution). divB stays at 2e-17.
+Plot `bcc1` and `bcc3` in r-φ slices from VTK to see the loop rotate.
+
+### MHD known limitations
+
+- **No GPU validation.** Kernels are Kokkos-portable but only CPU/Serial
+  parity is verified here.
+- **FOFC unsupported.** `<mhd>/fofc=true` errors out in spherical_shell.
+- **AMR/SMR unsupported.** Prolongation/restriction of face-centred B with
+  spherical CT geometry is non-trivial; deferred.
+- **No pole boundary handling.** User must keep θ strictly in (0, π).
+- **PLM/PPM reconstruction is index-uniform.** Same caveat as for hydro
+  on log-r.
+- **Monopole residual velocity ~4% over many cycles** is a known property
+  of the discrete force-free split, not a CT problem. Same in Athena++.
+
+---
+
 ## 7. Known limitations / next steps
 
 In rough order of urgency:
 
-1. **No GPU validation yet.** Kernels are Kokkos-portable; needs a CUDA/HIP
-   smoke run to confirm parity and set a performance baseline before MHD.
+1. **No GPU validation yet.** Kernels are Kokkos-portable (both hydro and
+   MHD/CT); needs a CUDA/HIP smoke run to confirm parity and set a
+   performance baseline.
 2. **Reconstruction is index-uniform** for nonuniform-r. Acceptable for
    moderate log-r stretching; document for strong stretching. A nonuniform-
    PLM (Mignone 2014) would be a clean follow-up.
@@ -395,8 +549,12 @@ In rough order of urgency:
 4. **Pole boundary conditions.** Not implemented. User must keep
    θ_min > 0, θ_max < π. Adding pole-aware BCs is required for full-sphere
    simulations.
-5. **FOFC in spherical_shell.** Errored out; the FOFC kernel still uses
-   Cartesian widths. Easy to port if needed.
+5. **FOFC in spherical_shell.** Errored out for both hydro and MHD; the
+   FOFC kernel still uses Cartesian widths. Easy to port if needed.
+6. **MHD AMR/SMR.** Constrained transport with prolongation/restriction of
+   face-centred B on a spherical grid is non-trivial; deferred.
+7. **Larger MHD vibe tests.** Radial Alfvén wave, MHD blast in spherical,
+   MHD current sheet on a wedge -- next round of validation after GPU parity.
 6. **AMR/SMR.** Not implemented.
 7. **MHD / CT.** The big one. Spherical CT requires face-centred B field
    storage and a Stokes-loop EMF update. References:

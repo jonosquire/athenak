@@ -1,0 +1,68 @@
+# AthenaK input: spherical-shell MHD field-loop preservation test (standard).
+#
+# Axisymmetric A_phi(r, theta) Gaussian loop centred at (r_c, theta_c=pi/2).
+# Field is fully in the (r, theta) plane (B_phi=0). v = 0.
+# Discrete Stokes loop initialisation gives divB = 0 exactly at IC.
+# CT should preserve the loop and divB to roundoff.
+#
+# Domain: r in [1, 3], theta wedge straddling the equator, periodic phi.
+# Quantitative diagnostics: divB stats, max|B_r|, max|B_theta|, total magnetic energy.
+# Build with -DPROBLEM=sph_shell_mhd.
+
+<comment>
+problem   = sph_shell_mhd / loop_eq (axisymmetric, v=0)
+
+<job>
+basename  = SphShellMHDLoop
+
+<mesh>
+nghost    = 2
+
+nx1       = 64
+x1min     = 1.0
+x1max     = 3.0
+ix1_bc    = outflow
+ox1_bc    = outflow
+
+nx2       = 64
+x2min     = 1.0707963267948966   # pi/2 - 0.5
+x2max     = 2.0707963267948966   # pi/2 + 0.5
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 8
+x3min     = 0.0
+x3max     = 0.2
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 64
+nx2       = 64
+nx3       = 8
+
+<coord>
+system          = spherical_shell
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = 50
+tlim       = 100.0
+
+<mhd>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hlld
+gamma           = 1.6666666666666667
+
+<problem>
+mode    = loop_eq
+flavor  = axisymmetric
+rho0    = 1.0
+p0      = 1.0
+A0      = 1.0e-3
+rc      = 2.0
+theta_c = 1.5707963267948966     # pi/2
+sigma   = 0.15

@@ -1,0 +1,74 @@
+# AthenaK input: spherical-shell MHD radial Alfven pulse (standard / quantitative).
+#
+# Background: rho=1, p=0.1, B_r(r) = B0 (r_ref/r)^2 on radial faces with B0=0.5
+# (-> v_A0 = 0.5 at r_ref=1; v_A drops as 1/r^2 outward). The pulse is launched
+# at r_c = 1.5 with a Gaussian envelope (no carrier; k_r = 0). With uniform rho
+# and v_A ~ 1/r^2, the WKB ray prediction is
+#   r(t) = ( r_c^3 + 3 r_ref^2 v_A0 t )^(1/3)
+# and the transverse amplitude is approximately conserved along the ray
+# (energy-flux conservation: rho |dv|^2 v_A * r^2 = const, with r^2 and 1/v_A
+# both ~ r^2 they cancel).
+#
+# Domain: r in [1, 8] -- a large radial range (factor 8) so WKB is well-tested.
+# Thin theta/phi wedge to make the run quick. Periodic phi.
+#
+# Build with -DPROBLEM=sph_shell_mhd.
+
+<comment>
+problem   = sph_shell_mhd / radial_alfven (standard)
+
+<job>
+basename  = SphShellMHDAW
+
+<mesh>
+nghost    = 2
+
+nx1       = 256
+x1min     = 1.0
+x1max     = 8.0
+ix1_bc    = outflow
+ox1_bc    = outflow
+
+nx2       = 8
+x2min     = 1.4707963267948966   # pi/2 - 0.1
+x2max     = 1.6707963267948966
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 8
+x3min     = 0.0
+x3max     = 0.2
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 256
+nx2       = 8
+nx3       = 8
+
+<coord>
+system          = spherical_shell
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = -1
+tlim       = 5.0       # pulse traverses to r ~ 2.22; WKB centroid match within ~1%
+
+<mhd>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hlld
+gamma           = 1.6666666666666667
+
+<problem>
+mode    = radial_alfven
+rho0    = 1.0
+p0      = 0.1
+B0      = 0.5         # |B_r(r_ref)|
+r_ref   = 1.0
+r_c     = 1.5         # pulse centre at t=0
+sigma_r = 0.3         # Gaussian width (sigma_r > 10*dr for clean PLM resolution)
+eps     = 1.0e-3      # peak amplitude / B0
+k_r     = 0.0         # no carrier (pure pulse)
