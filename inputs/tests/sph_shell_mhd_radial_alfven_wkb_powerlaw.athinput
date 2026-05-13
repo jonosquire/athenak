@@ -1,0 +1,108 @@
+# AthenaK input: spherical-shell MHD radial Alfven WKB check on a power-law grid.
+#
+# This is a quantitative GPU-oriented run, not just a visual vibe check.  The
+# packet lives in a thin theta-phi wedge and uses a travel-time WKB carrier:
+#   tau(r) = int_{r_c}^r dr / v_A(r)
+#   carrier = cos(omega * tau)
+# so k_parallel * v_A is approximately constant as the packet moves outward.
+# The grid uses radial_grid=power_law with alpha=1/3, so the logical coordinate
+# approximately follows int dr / v_A for B_r ~ r^-2.
+#
+# Expected outgoing WKB amplitude scaling in this setup:
+#   z_+ ~ sqrt(v_A) ~ sqrt(B_r) ~ r_c/r
+# The post-processing script compares the measured signed Elsasser amplitude
+# against that scaling to estimate numerical dissipation.
+
+<comment>
+problem   = sph_shell_mhd / radial_alfven (WKB power-law quantitative)
+
+<job>
+basename  = SphShellMHDAWWKBPower
+
+<mesh>
+nghost    = 2
+
+nx1       = 20480
+x1min     = 1.0
+x1max     = 8.0
+ix1_bc    = user
+ox1_bc    = user
+
+nx2       = 16
+x2min     = 1.4907963267948965   # pi/2 - 0.08
+x2max     = 1.6507963267948966   # pi/2 + 0.08
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 16
+x3min     = 0.0
+x3max     = 0.16
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 64
+nx2       = 8
+nx3       = 8
+
+<coord>
+system          = spherical_shell
+
+<spherical_shell>
+radial_grid     = power_law
+r_grid_alpha    = 0.3333333333333333
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = -1
+tlim       = 55.0
+
+<mhd>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hlld
+gamma           = 1.6666666666666667
+
+<output1>
+file_type   = bin
+id          = rtheta
+variable    = mhd_w_bcc
+slice_x3    = 0.08
+dt          = 11.0
+ghost_zones = false
+
+<output2>
+file_type   = bin
+id          = rphi
+variable    = mhd_w_bcc
+slice_x2    = 1.5707963267948966
+dt          = 11.0
+ghost_zones = false
+
+<output3>
+file_type   = bin
+id          = thetaphi
+variable    = mhd_w_bcc
+slice_x1    = 4.5
+dt          = 11.0
+ghost_zones = false
+
+<problem>
+mode            = radial_alfven
+rho0            = 1.0
+p0              = 1.0e-5
+B0              = 0.5
+r_ref           = 1.0
+r_c             = 2.2
+eps             = 1.0e-3
+phase_model     = travel_time
+amplitude_model = sqrt_va
+omega           = 6.0
+sigma_tau       = 3.0
+
+# Legacy radial-profile parameters are retained for parser/backward-compatibility
+# defaults but are not used when phase_model=travel_time.
+sigma_r         = 0.3
+k_r             = 0.0

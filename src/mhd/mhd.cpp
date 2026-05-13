@@ -288,6 +288,16 @@ MHD::MHD(MeshBlockPack *ppack, ParameterInput *pin) :
       // HLLD solver
       } else if (rsolver.compare("hlld") == 0) {
         rsolver_method = MHD_RSolver::hlld;
+      // LHLLD solver, adiabatic/ideal-gas only
+      } else if (rsolver.compare("lhlld") == 0) {
+        if (!peos->eos_data.is_ideal) {
+          std::cout << "### FATAL ERROR in " << __FILE__ << " at line " << __LINE__
+                    << std::endl << "<mhd>/rsolver = lhlld is implemented only "
+                    << "for <mhd>/eos = ideal. Use hlld/hlle/llf for isothermal MHD."
+                    << std::endl;
+          std::exit(EXIT_FAILURE);
+        }
+        rsolver_method = MHD_RSolver::lhlld;
       // Roe solver
       // } else if (rsolver.compare("roe") == 0) {
       //   rsolver_method = MHD_RSolver::roe;

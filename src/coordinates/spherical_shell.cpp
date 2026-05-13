@@ -55,6 +55,7 @@ UserRadialGridFnPtr GetUserRadialGridFunc() {
 //!   uniform   : r_face linear in the logical x1 coordinate (as in prior tasks)
 //!   log       : r_face uniform in ln(r) over [mesh.x1min, mesh.x1max]
 //!   power_law : r_face = r_min + (r_max - r_min) * xi_norm^grid_alpha
+//!   r_cubed   : r_face^3 is linear in xi_norm
 //!   user      : r_face from the user-registered host function
 //!               (GetUserRadialGridFunc()); evaluated on host, then deep-copied
 //!               to device.
@@ -168,6 +169,34 @@ void ConstructSphericalShellGeometry(MeshBlockPack *ppack,
         rf = mesh_x1min + (mesh_x1max - mesh_x1min) * Kokkos::pow(xi_norm, alpha);
       } else {
         rf = mesh_x1min + (mesh_x1max - mesh_x1min) * xi_norm;
+      }
+      r_face(m, i)  = rf;
+      r2_face(m, i) = rf * rf;
+    });
+  } else if (grid_type == RadialGridType::r_cubed) {
+    // r^3 = r_min^3 + xi_norm * (r_max^3 - r_min^3).
+    //
+    // For the constant-density monopole background used by the driven Alfven
+    // diagnostic, v_A ~ B_r ~ r^-2, so the travel-time coordinate tau = int dr/v_A
+    // is proportional to r^3. This map gives uniform radial face spacing in tau.
+    const Real rmin3 = mesh_x1min * mesh_x1min * mesh_x1min;
+    const Real rmax3 = mesh_x1max * mesh_x1max * mesh_x1max;
+    const Real dr3 = rmax3 - rmin3;
+    const Real slope_lo = dr3 / (3.0 * mesh_x1min * mesh_x1min);
+    const Real slope_hi = dr3 / (3.0 * mesh_x1max * mesh_x1max);
+    par_for("sph_geom_rfaces_r_cubed", DevExeSpace(), 0, nmb1, 0, nc1,
+    KOKKOS_LAMBDA(int m, int i) {
+      Real x1min = mbsize.d_view(m).x1min;
+      Real x1max = mbsize.d_view(m).x1max;
+      Real xi = LeftEdgeX(i - ng, nx1, x1min, x1max);
+      Real xi_norm = (xi - mesh_x1min) / mesh_x1len;
+      Real rf;
+      if (xi_norm >= 0.0 && xi_norm <= 1.0) {
+        rf = Kokkos::pow(rmin3 + xi_norm * dr3, 1.0/3.0);
+      } else if (xi_norm < 0.0) {
+        rf = mesh_x1min + slope_lo * xi_norm;
+      } else {
+        rf = mesh_x1max + slope_hi * (xi_norm - 1.0);
       }
       r_face(m, i)  = rf;
       r2_face(m, i) = rf * rf;

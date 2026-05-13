@@ -55,4 +55,7 @@ compile_commands.json
 /build*/
 /cluster_validation/
 /cluster_validation_round2/
+/aw_damping_scan/
+/wave_action_conservation/
+/monopole_hlld_interface_debug/
 /.codex

@@ -451,14 +451,18 @@ factors out edge lengths that don't vary across the relevant difference.
 | `sph_shell_mhd_toroidal_static.athinput`         | toroidal_static    | divB preservation for axisymmetric B_φ              |
 | `sph_shell_mhd_radial_alfven.athinput`           | radial_alfven      | outgoing axisym Alfvén pulse on 1/r² monopole; WKB centroid + divB |
 | `sph_shell_mhd_radial_alfven_vibe.athinput`      | radial_alfven      | high-res WKB vibe: nx1=1024, carrier k_r=60, r∈[1,10], VTK dumps |
+| `sph_shell_mhd_radial_alfven_bin_vibe.athinput`  | radial_alfven      | GPU native-bin slice vibe + transverse-amplitude radial diagnostics |
+| `sph_shell_mhd_radial_alfven_wkb_powerlaw.athinput` | radial_alfven   | thin-tube power-law-grid WKB check with `sqrt(v_A)` amplitude diagnostic |
 | `sph_shell_mhd_loop_eq.athinput`                 | loop_eq / axisym   | axisymmetric A_φ Gaussian loop in (r,θ), v=0; CT field preservation |
 | `sph_shell_mhd_loop_eq_vibe.athinput`            | loop_eq / advect   | non-axisym A_θ loop in (r,φ), solid-body Ω=0.25; VTK rotation vibe |
+| `sph_shell_mhd_loop_advect_bin_vibe.athinput`    | loop_eq / advect   | GPU native-bin slice vibe for rotating non-axisymmetric field loop |
 
 Run with `-DPROBLEM=sph_shell_mhd`. Each test reports:
 
 - `divB` L1, L2, Linf and a normalised `Linf · h / |B|max` metric.
-- Max `|v|/cs_iso` (should remain near roundoff for symmetric ICs; small
-  residual on the monopole due to the discrete force-free split).
+- Max `|v|/cs_iso` (should remain near roundoff for symmetric ICs; the
+  monopole has a small, convergent force-balance residual after analytic
+  radial ghost zones).
 - Max `|B1f − analytic|` for the monopole, verifying CT preserves the field.
 
 ### Quantitative CPU/Serial results
@@ -466,10 +470,10 @@ Run with `-DPROBLEM=sph_shell_mhd`. Each test reports:
 Single block:
 
 ```
-monopole (uniform-r) nlim=20:  divB L1=1.2e-15, Linf=1.7e-14, max|B1f-analytic|=1.1e-16
-monopole (log-r)     nlim=20:  divB L1=5.9e-16, Linf=1.2e-14, max|B1f-analytic|=1.1e-16
-toroidal_static      nlim=10:  divB L1=1.2e-17, Linf=9.3e-17
-uniform_static       nlim=20:  divB=0, max|v|=4.9e-17
+monopole (uniform-r) t=0.14: divB L1=1.3e-15, Linf=1.5e-14, max|B1f-analytic|=1.1e-16, max|v|/cs=4.1e-5
+monopole (log-r)     t=0.14: divB L1=5.2e-16, Linf=1.1e-14, max|B1f-analytic|=1.1e-16, max|v|/cs=6.4e-5
+toroidal_static      nlim=10: divB L1=1.2e-17, Linf=9.3e-17
+uniform_static       nlim=20: divB=0, max|v|=4.9e-17
 ```
 
 Multi-block (4×2×2 = 16 blocks):
@@ -482,11 +486,22 @@ monopole (log-r)     nlim=20:  divB L1=5.7e-16, Linf=1.7e-14, max|B1f-analytic|=
 CT preserves divB at machine precision across MeshBlock boundaries on both
 uniform-r and log-r grids.
 
-The ~4% residual `max|v|/cs` on the radial monopole is **not** a CT bug. It
-comes from the discrete spherical FV / source-term split: cell-centred B²
-in the curvature source does not exactly cancel face-centred B² in the
-flux divergence for a 1/r² monopole. The same residual is present in
-Athena++. `divB` itself remains at machine precision throughout.
+The earlier ~4% `max|v|/cs` residual on the radial monopole was traced to
+radial outflow ghost zones: copying `B_r` into radial ghosts breaks the
+analytic 1/r² profile and launches a boundary-layer Lorentz-force residual
+while `divB` remains at roundoff. The monopole pgen now installs analytic
+radial user BCs. With those BCs, the remaining fixed-time residual converges
+at about second order:
+
+| grid | uniform-r max\|v\|/cs at t=0.14 | log-r max\|v\|/cs at t=0.14 |
+|------|-------------------------------|---------------------------|
+| 32×16×8   | 1.8e-4 | 2.8e-4 |
+| 64×32×16  | 4.1e-5 | 6.4e-5 |
+| 128×64×32 | 9.6e-6 | not rerun |
+
+Halving the CFL at 64×32×16 leaves the residual unchanged (4.14e-5), and
+switching reconstruction among donor-cell, PLM, and PPM4 changes it only
+at the few-percent level. `divB` stays at machine precision throughout.
 
 **Radial Alfvén (`radial_alfven`)**, standard test (`tlim=5`, σ_r=0.3, nx1=256, r ∈ [1, 8]):
 ```
@@ -519,16 +534,76 @@ Plot `bcc1` and `bcc3` in r-φ slices from VTK to see the loop rotate.
 
 ### MHD known limitations
 
-- **No GPU validation.** Kernels are Kokkos-portable but only CPU/Serial
-  parity is verified here.
+- **GPU validation is still targeted.** A100 CUDA smoke and native-bin vibe
+  checks have run, but there is not yet a full GPU convergence/parity matrix.
 - **FOFC unsupported.** `<mhd>/fofc=true` errors out in spherical_shell.
 - **AMR/SMR unsupported.** Prolongation/restriction of face-centred B with
   spherical CT geometry is non-trivial; deferred.
 - **No pole boundary handling.** User must keep θ strictly in (0, π).
 - **PLM/PPM reconstruction is index-uniform.** Same caveat as for hydro
   on log-r.
-- **Monopole residual velocity ~4% over many cycles** is a known property
-  of the discrete force-free split, not a CT problem. Same in Athena++.
+- **Monopole force balance is sensitive to radial ghost zones.** The standard
+  monopole inputs use analytic radial user BCs; plain radial outflow produces
+  a boundary-layer velocity residual even though `divB` remains roundoff.
+
+### Native binary output for spherical-shell MHD
+
+Native `bin` output works for spherical-shell MHD with `variable=mhd_w_bcc`.
+The existing `vis/python/bin_convert.py` reader reports time, cycle, root
+grid dimensions, MeshBlock layout, and variables
+`dens, velx, vely, velz, eint, bcc1, bcc2, bcc3`. The binary header includes
+the full input dump, so plotting scripts can recover `<coord>/system =
+spherical_shell` and `<spherical_shell>/radial_grid` without changing the
+writer. Face-centred magnetic fields are not included in `mhd_w_bcc`; use
+`bcc1..bcc3` for simple plots unless a dedicated output variable is added.
+
+A small validation script lives at
+`mhd_output_validation/scripts/inspect_mhd_bin.py` in the ignored local
+validation tree. It reads a bin file through `bin_convert.py`, prints the
+metadata above, reconstructs spherical coordinates from the header, and
+saves simple r-theta `|B|`, `|v|`, and mapped R-Z plots. A two-rank CPU/MPI
+smoke wrote a single readable combined binary file with two MeshBlocks.
+
+The larger ignored local validation tree `mhd_vibe_validation/` contains the
+GPU native-bin slice workflow:
+
+```bash
+./build-mhd-vibe-gpu-gcc/src/athena -i inputs/tests/sph_shell_mhd_radial_alfven_bin_vibe.athinput -d mhd_vibe_validation/data/aw_bin_vibe
+./build-mhd-vibe-gpu-gcc/src/athena -i inputs/tests/sph_shell_mhd_loop_advect_bin_vibe.athinput -d mhd_vibe_validation/data/loop_bin_vibe
+
+/home/squjo23p/conda-envs/curmpy/bin/python mhd_vibe_validation/scripts/plot_mhd_bin_slices.py \
+  --run-dir mhd_vibe_validation/data/aw_bin_vibe --out-dir mhd_vibe_validation/plots \
+  --tag aw_atmosphere --quantity bperp --profiles
+/home/squjo23p/conda-envs/curmpy/bin/python mhd_vibe_validation/scripts/plot_mhd_bin_slices.py \
+  --run-dir mhd_vibe_validation/data/loop_bin_vibe --out-dir mhd_vibe_validation/plots \
+  --tag loop_advect --quantity bmag
+```
+
+The plotting script reads the three native-bin slice streams (`rtheta`,
+`rphi`, `thetaphi`) and produces four-panel figures: true physical R-Z,
+true physical X-Y, a projected constant-r surface, and the raw logical
+r-theta grid. It overlays projected magnetic-field directions and, for the
+radial Alfvén run, writes radial profiles of `v_perp`, `B_perp`,
+background `B_r`, `rho`, `v_A`, area factor, and the two candidate Elsasser
+amplitudes. On the A100 GPU run, `divB` stayed small (`Linf*h/|B|max` about
+`1.3e-13` for the long Alfvén vibe, `2.1e-14` for the loop advection vibe).
+The high-carrier Alfvén packet was strongly damped by PLM by `t=12`, so use
+this bin-vibe run as a geometry/output diagnostic rather than a precise WKB
+amplitude-preservation benchmark.
+
+The stricter power-law-grid check
+`sph_shell_mhd_radial_alfven_wkb_powerlaw.athinput` uses a thin 16×16 angular
+tube, `nx1=20480`, `radial_grid=power_law`, `r_grid_alpha=1/3`, and a carrier
+defined in Alfvén travel-time coordinate so `k_parallel v_A` is approximately
+constant. The local carrier resolution is at least 23 points per wavelength
+over the packet path. On the A100 run to `t=55`, the packet moved from
+`r_c=2.2` to `r=4.533`, matching the WKB ray to `1.2e-4` relative error, with
+`divB` normalized `1.3e-13`. Relative to the requested
+`z_+ proportional sqrt(v_A) ~ r_c/r` amplitude scaling, the signed
+`z_out = v_phi - B_phi/sqrt(rho)` RMS amplitude was not numerically damped:
+it ended about 25% above the `sqrt(v_A)` reference. See
+`mhd_vibe_validation/summary.md` and
+`mhd_vibe_validation/plots/aw_wkb_powerlaw_wkb_dissipation.png`.
 
 ---
 
@@ -536,9 +611,9 @@ Plot `bcc1` and `bcc3` in r-φ slices from VTK to see the loop rotate.
 
 In rough order of urgency:
 
-1. **No GPU validation yet.** Kernels are Kokkos-portable (both hydro and
-   MHD/CT); needs a CUDA/HIP smoke run to confirm parity and set a
-   performance baseline.
+1. **GPU validation is partial.** CUDA smoke and native-bin MHD vibe checks
+   have run on an A100, but a broader GPU convergence/parity matrix is still
+   needed before production runs.
 2. **Reconstruction is index-uniform** for nonuniform-r. Acceptable for
    moderate log-r stretching; document for strong stretching. A nonuniform-
    PLM (Mignone 2014) would be a clean follow-up.

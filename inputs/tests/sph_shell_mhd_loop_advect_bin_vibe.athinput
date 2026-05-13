@@ -1,0 +1,88 @@
+# AthenaK input: spherical-shell MHD field-loop advection vibe with native bin slices.
+#
+# Non-axisymmetric A_theta(r, phi) loop in an equatorial wedge. The loop is
+# advected by solid-body rotation and should keep a coherent field geometry
+# while CT keeps divB small.
+
+<comment>
+problem   = sph_shell_mhd / loop_eq advect (bin-slice vibe)
+
+<job>
+basename  = SphShellMHDLoopBinVibe
+
+<mesh>
+nghost    = 2
+
+nx1       = 256
+x1min     = 1.0
+x1max     = 3.0
+ix1_bc    = outflow
+ox1_bc    = outflow
+
+nx2       = 48
+x2min     = 1.2707963267948965
+x2max     = 1.8707963267948966
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 256
+x3min     = 0.0
+x3max     = 6.283185307179586
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 32
+nx2       = 16
+nx3       = 32
+
+<coord>
+system          = spherical_shell
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = -1
+tlim       = 6.283185307179586
+
+<mhd>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hlld
+gamma           = 1.6666666666666667
+
+<output1>
+file_type   = bin
+id          = rtheta
+variable    = mhd_w_bcc
+slice_x3    = 1.0
+dt          = 1.5707963267948966
+ghost_zones = false
+
+<output2>
+file_type   = bin
+id          = rphi
+variable    = mhd_w_bcc
+slice_x2    = 1.5707963267948966
+dt          = 1.5707963267948966
+ghost_zones = false
+
+<output3>
+file_type   = bin
+id          = thetaphi
+variable    = mhd_w_bcc
+slice_x1    = 2.0
+dt          = 1.5707963267948966
+ghost_zones = false
+
+<problem>
+mode     = loop_eq
+flavor   = advect
+rho0     = 1.0
+p0       = 1.0
+A0       = 1.0e-3
+rc       = 2.0
+phi_c    = 1.0
+sigma    = 0.30
+Omega    = 0.25

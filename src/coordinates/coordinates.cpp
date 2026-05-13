@@ -78,6 +78,16 @@ Coordinates::Coordinates(ParameterInput *pin, MeshBlockPack *ppack) :
         }
       } else if (rgrid == "power_law") {
         radial_grid = RadialGridType::power_law;
+      } else if (rgrid == "r_cubed" || rgrid == "r3" ||
+                 rgrid == "alfven_tau" || rgrid == "powerlaw_traveltime") {
+        radial_grid = RadialGridType::r_cubed;
+        if (pmy_pack->pmesh->mesh_size.x1min <= 0.0) {
+          std::cout << "### FATAL ERROR in " << __FILE__ << " at line "
+                    << __LINE__ << std::endl
+                    << "spherical_shell radial_grid=" << rgrid
+                    << " requires <mesh>/x1min > 0" << std::endl;
+          std::exit(EXIT_FAILURE);
+        }
       } else if (rgrid == "user") {
         radial_grid = RadialGridType::user;
         if (GetUserRadialGridFunc() == nullptr) {
@@ -92,7 +102,7 @@ Coordinates::Coordinates(ParameterInput *pin, MeshBlockPack *ppack) :
         std::cout << "### FATAL ERROR in " << __FILE__ << " at line "
                   << __LINE__ << std::endl
                   << "Unknown <spherical_shell>/radial_grid = '"
-                  << rgrid << "'. Allowed: uniform, log, power_law, user."
+                  << rgrid << "'. Allowed: uniform, log, power_law, r_cubed, user."
                   << std::endl;
         std::exit(EXIT_FAILURE);
       }

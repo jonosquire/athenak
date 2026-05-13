@@ -1,0 +1,89 @@
+# AthenaK input: spherical-shell MHD radial Alfven vibe check with native bin slices.
+#
+# Axisymmetric outgoing Alfven packet on a radial monopole background. The
+# resolution is anisotropic because the mode is axisymmetric; theta/phi are
+# still resolved well enough to validate spherical-slice binary output and
+# true-geometry plotting.
+
+<comment>
+problem   = sph_shell_mhd / radial_alfven (bin-slice vibe)
+
+<job>
+basename  = SphShellMHDAWBinVibe
+
+<mesh>
+nghost    = 2
+
+nx1       = 512
+x1min     = 1.0
+x1max     = 8.0
+ix1_bc    = user
+ox1_bc    = user
+
+nx2       = 96
+x2min     = 1.0471975511965976
+x2max     = 2.0943951023931953
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 128
+x3min     = 0.0
+x3max     = 1.5707963267948966
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 32
+nx2       = 16
+nx3       = 16
+
+<coord>
+system          = spherical_shell
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = -1
+tlim       = 12.0
+
+<mhd>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hlld
+gamma           = 1.6666666666666667
+
+<output1>
+file_type   = bin
+id          = rtheta
+variable    = mhd_w_bcc
+slice_x3    = 0.7853981633974483
+dt          = 3.0
+ghost_zones = false
+
+<output2>
+file_type   = bin
+id          = rphi
+variable    = mhd_w_bcc
+slice_x2    = 1.5707963267948966
+dt          = 3.0
+ghost_zones = false
+
+<output3>
+file_type   = bin
+id          = thetaphi
+variable    = mhd_w_bcc
+slice_x1    = 3.0
+dt          = 3.0
+ghost_zones = false
+
+<problem>
+mode    = radial_alfven
+rho0    = 1.0
+p0      = 0.1
+B0      = 0.5
+r_ref   = 1.0
+r_c     = 1.5
+sigma_r = 0.22
+eps     = 1.0e-3
+k_r     = 35.0

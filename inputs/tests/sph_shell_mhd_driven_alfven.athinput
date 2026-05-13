@@ -1,0 +1,87 @@
+# AthenaK input: spherical-shell MHD driven monochromatic Alfven wave.
+#
+# Lower radial boundary drives a k_perp=0, phi-polarized transverse Alfven wave
+# on a static radial-monopole background B_r = B0 (r_ref/r)^2.  Radial user BCs
+# keep rho, p, v_r, and B_r on the analytic background; the inner ghost zones
+# impose v_phi(t) and B_phi(t) with the selected Elsasser branch.  The outer
+# radial BC keeps B_r analytic and copies transverse perturbations with a simple
+# zero-gradient rule.  Analysis should stay well away from the outer boundary.
+#
+# The default pilot uses uniform-r.  Post-processing computes the actual
+# tau(r)=int dr/v_A from output radii, so the shortening wavelength in r as
+# v_A drops outward is handled in the Fourier/phase diagnostics.
+#
+# Build with -DPROBLEM=sph_shell_mhd.
+
+<comment>
+problem   = sph_shell_mhd / driven_alfven
+
+<job>
+basename  = SphShellMHDDrivenAW
+
+<mesh>
+nghost    = 3
+
+nx1       = 4096
+x1min     = 1.0
+x1max     = 8.0
+ix1_bc    = user
+ox1_bc    = user
+
+nx2       = 8
+x2min     = 1.5107963267948965   # pi/2 - 0.06
+x2max     = 1.6307963267948966   # pi/2 + 0.06
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 8
+x3min     = 0.0
+x3max     = 0.12
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 128
+nx2       = 8
+nx3       = 8
+
+<coord>
+system          = spherical_shell
+
+<spherical_shell>
+radial_grid     = uniform
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = -1
+tlim       = 80.0
+
+<mhd>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hlld
+gamma           = 1.6666666666666667
+
+<output1>
+file_type   = bin
+id          = rtheta
+variable    = mhd_w_bcc
+slice_x3    = 0.06
+dt          = 0.5
+ghost_zones = false
+
+<problem>
+mode                = driven_alfven
+rho0                = 1.0
+p0                  = 1.0
+B0                  = 0.5
+r_ref               = 1.0
+driver_amp          = 5.0e-5
+driver_omega        = 1.0
+driver_phase        = 0.0
+driver_start_time   = 0.0
+driver_ramp_time    = 6.283185307179586
+driver_polarization = phi
+outgoing_branch     = z1

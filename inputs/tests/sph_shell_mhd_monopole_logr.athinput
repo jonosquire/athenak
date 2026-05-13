@@ -15,8 +15,8 @@ nghost    = 2
 nx1       = 64
 x1min     = 1.0
 x1max     = 10.0                  # one decade in r => significant stretching
-ix1_bc    = outflow
-ox1_bc    = outflow
+ix1_bc    = user
+ox1_bc    = user
 
 nx2       = 32
 x2min     = 0.5235987755982988    # pi/6

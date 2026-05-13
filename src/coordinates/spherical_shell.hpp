@@ -30,6 +30,8 @@ class ParameterInput;
 //!   log       : r_face uniform in ln(r) over the global mesh [x1min, x1max].
 //!   power_law : r_face = r_min + (r_max - r_min) * xi_norm^alpha, where alpha
 //!               is configurable via <spherical_shell>/r_grid_alpha.
+//!   r_cubed   : r_face^3 is linear in xi_norm. For a constant-density monopole
+//!               v_A proportional to r^-2, this is uniform in Alfven travel time.
 //!   user      : r_face supplied by a user host-side function pointer registered
 //!               via SetUserRadialGridFunc() before Coordinates construction.
 //!               See README-sph.md.
@@ -38,6 +40,7 @@ enum class RadialGridType {
   uniform,
   log,
   power_law,
+  r_cubed,
   user
 };
 
