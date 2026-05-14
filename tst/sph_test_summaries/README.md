@@ -16,3 +16,4 @@ Included reports:
 - `monopole_hlld_interface_debug_summary.md` - HLLD radial-interface pathology investigation.
 - `monopole_hlld_interface_debug_hlld_comparison_notes.md` - AthenaK/Athena++ HLLD comparison notes.
 - `monopole_lhlld_minimal_summary.md` - LHLLD minimal port and Parker HLLD follow-up.
+- `poly_parker_mhd_summary.md` - branch-safe polytropic Parker MHD background validation (Task 4.2).
