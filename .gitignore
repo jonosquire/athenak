@@ -59,3 +59,6 @@ compile_commands.json
 /wave_action_conservation/
 /monopole_hlld_interface_debug/
 /.codex
+
+# Local development scratch (Task 4.2 polytropic Parker)
+poly_parker_mhd_validation/

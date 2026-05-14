@@ -456,6 +456,7 @@ factors out edge lengths that don't vary across the relevant difference.
 | `sph_shell_mhd_loop_eq.athinput`                 | loop_eq / axisym   | axisymmetric A_φ Gaussian loop in (r,θ), v=0; CT field preservation |
 | `sph_shell_mhd_loop_eq_vibe.athinput`            | loop_eq / advect   | non-axisym A_θ loop in (r,φ), solid-body Ω=0.25; VTK rotation vibe |
 | `sph_shell_mhd_loop_advect_bin_vibe.athinput`    | loop_eq / advect   | GPU native-bin slice vibe for rotating non-axisymmetric field loop |
+| `sph_shell_mhd_parker_polytropic.athinput`       | parker_polytropic  | ideal-gas (γ≈1) Parker wind + radial monopole; HLLD/LHLLD compatible (Task 4.2) |
 
 Run with `-DPROBLEM=sph_shell_mhd`. Each test reports:
 
@@ -531,6 +532,40 @@ the loop has translated 1.57 rad in φ as predicted; magnetic energy
 decays from numerical PLM dissipation (factor ~3.5 at quarter period at
 nx3=128 resolution -- ramps up with resolution). divB stays at 2e-17.
 Plot `bcc1` and `bcc3` in r-φ slices from VTK to see the loop rotate.
+
+**Polytropic Parker MHD (Task 4.2, `parker_polytropic`)**:
+
+Ideal-gas Parker wind with `gamma_poly` near 1 (default 1.05) plus radial
+monopole. Branch-safe bisection root solve, Alfvén-point target B0
+calibration. Use with `<mhd>/eos=ideal`, both **HLLD** and **LHLLD** are
+supported (LHLLD is adiabatic-only in this fork, so it cannot be used with
+the older `parker_isothermal` mode). Source-term gravity uses
+`<mhd_srcterms>/r_inv_sq_gravity = true` and `r_inv_sq_gm = GM`.
+
+Key parameters (under `<problem>`):
+
+```ini
+mode                  = parker_polytropic
+gamma_poly            = 1.05          # must match <mhd>/gamma
+GM                    = 4.0           # must match <mhd_srcterms>/r_inv_sq_gm
+rcrit                 = 2.0
+rho_inner             = 1.0
+r_inner               = 1.0           # defaults to <mesh>/x1min
+alfven_point_target   = 13.0
+outer_bc              = analytic      # or "outflow"
+csv_dir               =               # optional: writes radial-profile CSV at finalize
+label                 = default
+```
+
+`B0` is calibrated automatically so M_A=1 at `r = alfven_point_target`. The
+finalizer prints L1/Linf relative errors in ρ, v_r, p, mass flux ρ·v_r·r²,
+plus max transverse velocity / B normalised by c_s and √ρ_inner, plus the
+shared divB diagnostic. Local CPU validation results and a reduced test
+matrix live under `poly_parker_mhd_validation/` (gitignored).
+
+Baseline (`plm_hlld_nr512`, `t=5`): `max|v_⊥|/c_s ≈ 1e-12`, divB L1 ≈ 1e-12.
+The polytropic Parker is therefore the recommended quiet flowing background
+for the next-task lower-radial-boundary monochromatic Alfvén-wave driver.
 
 ### MHD known limitations
 

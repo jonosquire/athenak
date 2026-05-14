@@ -15,6 +15,10 @@
 //!   "driven_alfven"    : lower-radial-boundary monochromatic k_perp=0 Alfven wave
 //!                        on the same monopole background.
 //!   "parker_isothermal": analytic isothermal Parker wind plus radial monopole B_r.
+//!   "parker_polytropic": ideal-gas polytropic Parker wind (gamma near 1) plus
+//!                        radial monopole B_r. Branch-safe bisection root finder,
+//!                        Alfven-point target B0 calibration. Suitable for HLLD
+//!                        AND LHLLD (ideal-gas only).
 //!   "loop_eq"          : magnetic field loop on the equatorial wedge.
 //!                        flavor=axisymmetric:    A_phi loop in (r,theta), v=0 (standard)
 //!                        flavor=advect:          A_theta loop in (r,phi), v_phi=Omega*r*sin(theta)
@@ -51,6 +55,7 @@
 namespace {
   enum class Mode { kNone, kUniformStatic, kMonopole, kToroidalStatic,
                     kRadialAlfven, kDrivenAlfven, kParkerIsothermal,
+                    kParkerPolytropic,
                     kLoopEqAxi, kLoopEqAdvect };
   static Mode g_mode = Mode::kNone;
   static Real g_rho0 = 1.0;
@@ -87,6 +92,29 @@ namespace {
   static Real g_parker_M_inner = 1.0;
   static bool g_parker_outer_analytic = true;
 
+  // Polytropic Parker wind state (ideal-gas MHD with gamma close to 1).
+  // Critical-point parameterisation: a_c = sqrt(GM/(2*rcrit)), x = r/rcrit, y = U/a_c.
+  // Dimensionless transonic solution F(y,x;gamma) = 0:
+  //   y^2/2 + (1/(g-1))*(1/(y x^2))^(g-1) - 2/x - (1/(g-1) - 3/2) = 0
+  // Subsonic branch  for r < rcrit, y in (0,1).
+  // Supersonic branch for r > rcrit, y in (1, +inf).
+  // Mass conservation gives rho(r); pressure follows from polytrope p = K rho^g.
+  // B0 calibrated so the Alfven point M_A=1 sits at r = r_alfven_target.
+  static Real g_polyp_gm           = 4.0;
+  static Real g_polyp_gamma        = 1.05;
+  static Real g_polyp_rcrit        = 2.0;
+  static Real g_polyp_ac           = 1.0;     // critical sound speed
+  static Real g_polyp_rho_inner    = 1.0;
+  static Real g_polyp_r_inner      = 1.0;
+  static Real g_polyp_rho_c        = 1.0;     // density normalisation
+  static Real g_polyp_K_poly       = 1.0;     // p = K * rho^gamma
+  static Real g_polyp_rA_target    = 13.0;
+  static Real g_polyp_B0           = 0.5;
+  static bool g_polyp_outer_analytic = true;
+  static std::string g_polyp_log_dir;
+  static std::string g_polyp_csv_dir;
+  static std::string g_polyp_label;
+
   // Loop-test state
   static Real g_loop_A0    = 0.0;
   static Real g_loop_rc    = 0.0;
@@ -102,10 +130,85 @@ namespace {
   void RadialAlfvenFinalize(ParameterInput *pin, Mesh *pm);
   void DrivenAlfvenFinalize(ParameterInput *pin, Mesh *pm);
   void ParkerIsothermalFinalize(ParameterInput *pin, Mesh *pm);
+  void ParkerPolytropicFinalize(ParameterInput *pin, Mesh *pm);
   void LoopEqFinalize(ParameterInput *pin, Mesh *pm);
   void MonopoleRadialBCs(Mesh *pm);
   void DrivenAlfvenRadialBCs(Mesh *pm);
   void ParkerMhdRadialBCs(Mesh *pm);
+  void ParkerPolyMhdRadialBCs(Mesh *pm);
+
+  //----------------------------------------------------------------------------------------
+  // Polytropic Parker dimensionless residual:
+  //   F(y, x; g) = y^2/2 + (1/(g-1))*(1/(y x^2))^(g-1) - 2/x - (1/(g-1) - 3/2)
+  // Device-callable (no std:: ; uses Kokkos::*).
+  KOKKOS_INLINE_FUNCTION
+  Real PolyParkerF(Real y, Real x, Real g) {
+    Real inv = 1.0 / (y * x * x);
+    Real pow_term = Kokkos::pow(inv, g - 1.0);
+    Real C = 1.0/(g - 1.0) - 1.5;
+    return 0.5*y*y + (1.0/(g - 1.0)) * pow_term - 2.0/x - C;
+  }
+
+  // Branch-safe bisection for y at given r. Selects subsonic branch (y<1) for r<rcrit,
+  // supersonic (y>1) for r>rcrit, and returns y=1 near the critical point.
+  KOKKOS_INLINE_FUNCTION
+  Real PolyParkerY(Real r, Real rcrit, Real g) {
+    Real x = r / rcrit;
+    if (Kokkos::fabs(x - 1.0) < 1.0e-10) return 1.0;
+    Real ylo, yhi;
+    if (x < 1.0) {
+      ylo = 1.0e-12;
+      yhi = 1.0 - 1.0e-10;
+    } else {
+      ylo = 1.0 + 1.0e-10;
+      yhi = 2.0;
+      // Expand yhi until F changes sign or hi cap reached.
+      Real flo = PolyParkerF(ylo, x, g);
+      for (int e = 0; e < 30; ++e) {
+        Real fhi = PolyParkerF(yhi, x, g);
+        if (flo * fhi <= 0.0) break;
+        yhi *= 2.0;
+        if (yhi > 1.0e6) break;
+      }
+    }
+    Real flo = PolyParkerF(ylo, x, g);
+    Real fhi = PolyParkerF(yhi, x, g);
+    if (flo * fhi > 0.0) {
+      // Pathological: return midpoint as fallback (caller should print x).
+      return 0.5*(ylo + yhi);
+    }
+    for (int it = 0; it < 80; ++it) {
+      Real ym = 0.5*(ylo + yhi);
+      Real fm = PolyParkerF(ym, x, g);
+      if (flo * fm <= 0.0) {
+        yhi = ym; fhi = fm;
+      } else {
+        ylo = ym; flo = fm;
+      }
+    }
+    return 0.5*(ylo + yhi);
+  }
+
+  // Evaluate cell-centred polytropic Parker state at r (uses global params).
+  // Returns U=v_r, rho, p in *Uout, *rhout, *pout. a_c, rcrit, gamma from globals.
+  KOKKOS_INLINE_FUNCTION
+  void EvaluatePolytropicParker(Real r,
+                                Real rcrit, Real ac, Real g,
+                                Real rho_c,
+                                Real *Uout, Real *rhout, Real *pout) {
+    Real y = PolyParkerY(r, rcrit, g);
+    Real U = ac * y;
+    Real rho = rho_c * ac * rcrit * rcrit / (U * r * r);
+    Real p = rho_c * ac * ac / g * Kokkos::pow(rho / rho_c, g);
+    *Uout = U;
+    *rhout = rho;
+    *pout = p;
+  }
+
+  KOKKOS_INLINE_FUNCTION
+  Real EvaluatePolytropicParkerBrFace(Real r_face, Real B0, Real r_inner) {
+    return B0 * (r_inner * r_inner) / (r_face * r_face);
+  }
 
   KOKKOS_INLINE_FUNCTION
   Real ParkerMachAtR(Real r, Real r_c) {
@@ -530,6 +633,127 @@ void ProblemGenerator::UserProblem(ParameterInput *pin, const bool restart) {
 	      u0(m, IM1, k, j, i) = rho * vr;
 	      u0(m, IM2, k, j, i) = 0.0;
 	      u0(m, IM3, k, j, i) = 0.0;
+	    });
+
+	  } else if (mode_str == "parker_polytropic") {
+	    // Ideal-gas polytropic Parker wind with radial monopole field.
+	    // Requires ideal-gas EOS, gamma close to 1 (default 1.05).
+	    if (!eos.is_ideal) {
+	      std::cout << "### FATAL ERROR: sph_shell_mhd parker_polytropic requires "
+	                << "<mhd>/eos = ideal" << std::endl;
+	      std::exit(EXIT_FAILURE);
+	    }
+	    g_mode = Mode::kParkerPolytropic;
+	    pgen_final_func = ParkerPolytropicFinalize;
+	    user_bcs_func = ParkerPolyMhdRadialBCs;
+
+	    g_polyp_gm        = pin->GetReal("problem", "GM");
+	    g_polyp_gamma     = pin->GetOrAddReal("problem", "gamma_poly", 1.05);
+	    g_polyp_rcrit     = pin->GetReal("problem", "rcrit");
+	    g_polyp_rho_inner = pin->GetOrAddReal("problem", "rho_inner", 1.0);
+	    g_polyp_r_inner   = pin->GetOrAddReal("problem", "r_inner",
+	                                          pmy_mesh_->mesh_size.x1min);
+	    g_polyp_rA_target = pin->GetOrAddReal("problem", "alfven_point_target", 13.0);
+	    const std::string outer_bc =
+	        pin->GetOrAddString("problem", "outer_bc", "analytic");
+	    g_polyp_outer_analytic = (outer_bc == "analytic");
+	    g_polyp_log_dir = pin->GetOrAddString("problem", "log_dir", "");
+	    g_polyp_csv_dir = pin->GetOrAddString("problem", "csv_dir", "");
+	    g_polyp_label   = pin->GetOrAddString("problem", "label", "default");
+
+	    // Consistency check on gamma vs <mhd>/gamma
+	    if (std::fabs(g_polyp_gamma - eos.gamma) > 1.0e-12) {
+	      std::cout << "### FATAL ERROR: parker_polytropic requires "
+	                << "<problem>/gamma_poly == <mhd>/gamma. Got "
+	                << "gamma_poly=" << g_polyp_gamma
+	                << ", mhd/gamma=" << eos.gamma << std::endl;
+	      std::exit(EXIT_FAILURE);
+	    }
+	    // gamma_poly must be > 1 strictly (otherwise the polytropic form degenerates).
+	    if (g_polyp_gamma <= 1.0) {
+	      std::cout << "### FATAL ERROR: parker_polytropic requires gamma_poly > 1, got "
+	                << g_polyp_gamma << std::endl;
+	      std::exit(EXIT_FAILURE);
+	    }
+
+	    // Derived: critical sound speed a_c = sqrt(GM/(2 rcrit))
+	    g_polyp_ac = std::sqrt(g_polyp_gm / (2.0 * g_polyp_rcrit));
+
+	    // Compute U at r_inner using device-callable bisection on host.
+	    Real U_inner = 0.0, rho_inner_dummy = 0.0, p_inner_dummy = 0.0;
+	    {
+	      // Need rho_c set first; but rho_c needs U_inner. Use temporary rho_c=1 to get y_inner,
+	      // then compute rho_c from mass conservation.
+	      Real y_in = PolyParkerY(g_polyp_r_inner, g_polyp_rcrit, g_polyp_gamma);
+	      U_inner = g_polyp_ac * y_in;
+	    }
+	    // rho_c such that rho(r_inner) = rho_inner.
+	    g_polyp_rho_c = g_polyp_rho_inner * U_inner * g_polyp_r_inner * g_polyp_r_inner
+	                  / (g_polyp_ac * g_polyp_rcrit * g_polyp_rcrit);
+	    // K so that p = K rho^gamma matches the polytrope normalisation
+	    //   p = rho_c * a_c^2 / gamma * (rho/rho_c)^gamma
+	    //   K = a_c^2 / (gamma * rho_c^(gamma-1))
+	    g_polyp_K_poly = g_polyp_ac * g_polyp_ac
+	                   / (g_polyp_gamma * std::pow(g_polyp_rho_c, g_polyp_gamma - 1.0));
+
+	    // B0 calibration so the Alfven point is at r = r_alfven_target.
+	    Real U_rA, rho_rA, p_rA;
+	    EvaluatePolytropicParker(g_polyp_rA_target, g_polyp_rcrit, g_polyp_ac,
+	                             g_polyp_gamma, g_polyp_rho_c,
+	                             &U_rA, &rho_rA, &p_rA);
+	    g_polyp_B0 = U_rA * std::sqrt(rho_rA)
+	               * (g_polyp_rA_target / g_polyp_r_inner)
+	               * (g_polyp_rA_target / g_polyp_r_inner);
+
+	    // Log a one-shot summary of derived values to rank 0.
+	    if (global_variable::my_rank == 0) {
+	      std::cout.precision(6);
+	      std::cout << std::scientific
+	                << "[parker_polytropic] gamma     = " << g_polyp_gamma << "\n"
+	                << "[parker_polytropic] GM        = " << g_polyp_gm << "\n"
+	                << "[parker_polytropic] rcrit     = " << g_polyp_rcrit << "\n"
+	                << "[parker_polytropic] a_c       = " << g_polyp_ac << "\n"
+	                << "[parker_polytropic] r_inner   = " << g_polyp_r_inner << "\n"
+	                << "[parker_polytropic] U_inner   = " << U_inner << "\n"
+	                << "[parker_polytropic] rho_c     = " << g_polyp_rho_c << "\n"
+	                << "[parker_polytropic] K_poly    = " << g_polyp_K_poly << "\n"
+	                << "[parker_polytropic] rA_target = " << g_polyp_rA_target << "\n"
+	                << "[parker_polytropic] U(rA)     = " << U_rA << "\n"
+	                << "[parker_polytropic] rho(rA)   = " << rho_rA << "\n"
+	                << "[parker_polytropic] B0        = " << g_polyp_B0
+	                << std::endl;
+	    }
+
+	    // Capture for kernels
+	    const Real ac     = g_polyp_ac;
+	    const Real rcrit  = g_polyp_rcrit;
+	    const Real gpoly  = g_polyp_gamma;
+	    const Real rhoc   = g_polyp_rho_c;
+	    const Real B0_poly = g_polyp_B0;
+	    const Real r_inner = g_polyp_r_inner;
+
+	    // (1) Radial-face B from analytic 1/r^2 monopole (so A1*B1 is divB-flat).
+	    par_for("sph_mhd_polyp_bx1f", DevExeSpace(),
+	            0, nmb1, ks, ke, js, je, is, ie+1,
+	    KOKKOS_LAMBDA(const int m, const int k, const int j, const int i) {
+	      Real rf = geom.r_face(m, i);
+	      b0.x1f(m, k, j, i) = EvaluatePolytropicParkerBrFace(rf, B0_poly, r_inner);
+	    });
+	    // (2) Cell-centred conserved state from polytropic Parker.
+	    par_for("sph_mhd_polyp_uc", DevExeSpace(),
+	            0, nmb1, ks, ke, js, je, is, ie,
+	    KOKKOS_LAMBDA(const int m, const int k, const int j, const int i) {
+	      Real r = geom.r_vol(m, i);
+	      Real U, rho, p;
+	      EvaluatePolytropicParker(r, rcrit, ac, gpoly, rhoc, &U, &rho, &p);
+	      Real br_cc = 0.5 * (b0.x1f(m, k, j, i) + b0.x1f(m, k, j, i+1));
+	      Real eb = 0.5 * br_cc * br_cc;
+	      u0(m, IDN, k, j, i) = rho;
+	      u0(m, IM1, k, j, i) = rho * U;
+	      u0(m, IM2, k, j, i) = 0.0;
+	      u0(m, IM3, k, j, i) = 0.0;
+	      u0(m, IEN, k, j, i) = p / (gpoly - 1.0)
+	                          + 0.5 * rho * U * U + eb;
 	    });
 
 	  } else if (mode_str == "loop_eq") {
@@ -1835,6 +2059,286 @@ void LoopEqFinalize(ParameterInput *pin, Mesh *pm) {
     }
   }
   PrintDivBStats(label, s);
+}
+
+//----------------------------------------------------------------------------------------
+// parker_polytropic radial user BC: imposes the analytic polytropic Parker + monopole
+// state in inner and (optionally) outer radial ghost zones. Uses the same evaluator
+// as the IC. Matches the structure of ParkerMhdRadialBCs.
+
+void ParkerPolyMhdRadialBCs(Mesh *pm) {
+  if (g_mode != Mode::kParkerPolytropic) return;
+  auto *pmbp = pm->pmb_pack;
+  auto &indcs = pm->mb_indcs;
+  const int is = indcs.is, ie = indcs.ie;
+  const int ng = indcs.ng;
+  const int n2 = (indcs.nx2 > 1) ? (indcs.nx2 + 2*ng) : 1;
+  const int n3 = (indcs.nx3 > 1) ? (indcs.nx3 + 2*ng) : 1;
+  const int nmb1 = pmbp->nmb_thispack - 1;
+  auto geom = pmbp->pcoord->shell_geom;
+  auto u0 = pmbp->pmhd->u0;
+  auto &b0 = pmbp->pmhd->b0;
+  auto &mb_bcs = pmbp->pmb->mb_bcs;
+  const bool outer_analytic = g_polyp_outer_analytic;
+  const Real ac     = g_polyp_ac;
+  const Real rcrit  = g_polyp_rcrit;
+  const Real gpoly  = g_polyp_gamma;
+  const Real rhoc   = g_polyp_rho_c;
+  const Real B0_poly = g_polyp_B0;
+  const Real r_inner = g_polyp_r_inner;
+
+  par_for("sph_mhd_polyp_radial_b", DevExeSpace(),
+          0, nmb1, 0, n3-1, 0, n2-1, 0, ng-1,
+  KOKKOS_LAMBDA(const int m, const int k, const int j, const int g) {
+    if (mb_bcs.d_view(m, BoundaryFace::inner_x1) == BoundaryFlag::user) {
+      const int i = is - g - 1;
+      const Real rf = geom.r_face(m, i);
+      b0.x1f(m, k, j, i) = EvaluatePolytropicParkerBrFace(rf, B0_poly, r_inner);
+      b0.x2f(m, k, j, i) = 0.0;
+      if (j == n2-1) b0.x2f(m, k, j+1, i) = 0.0;
+      b0.x3f(m, k, j, i) = 0.0;
+      if (k == n3-1) b0.x3f(m, k+1, j, i) = 0.0;
+    }
+    if (mb_bcs.d_view(m, BoundaryFace::outer_x1) == BoundaryFlag::user) {
+      const int i = ie + g + 2;
+      const Real rf = geom.r_face(m, i);
+      b0.x1f(m, k, j, i) = EvaluatePolytropicParkerBrFace(rf, B0_poly, r_inner);
+      b0.x2f(m, k, j, i-1) = 0.0;
+      if (j == n2-1) b0.x2f(m, k, j+1, i-1) = 0.0;
+      b0.x3f(m, k, j, i-1) = 0.0;
+      if (k == n3-1) b0.x3f(m, k+1, j, i-1) = 0.0;
+    }
+  });
+
+  par_for("sph_mhd_polyp_radial_u", DevExeSpace(),
+          0, nmb1, 0, n3-1, 0, n2-1, 0, ng-1,
+  KOKKOS_LAMBDA(const int m, const int k, const int j, const int g) {
+    if (mb_bcs.d_view(m, BoundaryFace::inner_x1) == BoundaryFlag::user) {
+      const int i = is - g - 1;
+      const Real r = geom.r_vol(m, i);
+      Real U, rho, p;
+      EvaluatePolytropicParker(r, rcrit, ac, gpoly, rhoc, &U, &rho, &p);
+      Real br_cc = 0.5 * (b0.x1f(m, k, j, i) + b0.x1f(m, k, j, i+1));
+      Real eb = 0.5 * br_cc * br_cc;
+      u0(m, IDN, k, j, i) = rho;
+      u0(m, IM1, k, j, i) = rho * U;
+      u0(m, IM2, k, j, i) = 0.0;
+      u0(m, IM3, k, j, i) = 0.0;
+      u0(m, IEN, k, j, i) = p / (gpoly - 1.0) + 0.5 * rho * U * U + eb;
+    }
+    if (mb_bcs.d_view(m, BoundaryFace::outer_x1) == BoundaryFlag::user) {
+      const int i = ie + g + 1;
+      if (outer_analytic) {
+        const Real r = geom.r_vol(m, i);
+        Real U, rho, p;
+        EvaluatePolytropicParker(r, rcrit, ac, gpoly, rhoc, &U, &rho, &p);
+        Real br_cc = 0.5 * (b0.x1f(m, k, j, i) + b0.x1f(m, k, j, i+1));
+        Real eb = 0.5 * br_cc * br_cc;
+        u0(m, IDN, k, j, i) = rho;
+        u0(m, IM1, k, j, i) = rho * U;
+        u0(m, IM2, k, j, i) = 0.0;
+        u0(m, IM3, k, j, i) = 0.0;
+        u0(m, IEN, k, j, i) = p / (gpoly - 1.0) + 0.5 * rho * U * U + eb;
+      } else {
+        u0(m, IDN, k, j, i) = u0(m, IDN, k, j, ie);
+        u0(m, IM1, k, j, i) = u0(m, IM1, k, j, ie);
+        u0(m, IM2, k, j, i) = u0(m, IM2, k, j, ie);
+        u0(m, IM3, k, j, i) = u0(m, IM3, k, j, ie);
+        u0(m, IEN, k, j, i) = u0(m, IEN, k, j, ie);
+      }
+    }
+  });
+}
+
+//----------------------------------------------------------------------------------------
+// parker_polytropic finalizer.  Reports L1/Linf relative errors in rho, v_r, p,
+// mass flux rho*v_r*r^2, transverse field/velocity components, plus divB stats.
+// If <problem>/csv_dir is set, writes a radial profile CSV taken on the central
+// theta/phi cell.
+
+void ParkerPolytropicFinalize(ParameterInput *pin, Mesh *pm) {
+  if (g_mode != Mode::kParkerPolytropic) return;
+  auto *pmbp = pm->pmb_pack;
+  auto &indcs = pm->mb_indcs;
+  const int is = indcs.is, ie = indcs.ie;
+  const int js = indcs.js, je = indcs.je;
+  const int ks = indcs.ks, ke = indcs.ke;
+  const int nmb1 = pmbp->nmb_thispack - 1;
+  auto geom = pmbp->pcoord->shell_geom;
+  auto u0 = pmbp->pmhd->u0;
+  auto bcc = pmbp->pmhd->bcc0;
+  const Real gpoly = g_polyp_gamma;
+  const Real ac    = g_polyp_ac;
+  const Real rcrit = g_polyp_rcrit;
+  const Real rhoc  = g_polyp_rho_c;
+  const Real B0_poly = g_polyp_B0;
+  const Real r_inner = g_polyp_r_inner;
+  const Real rho_inner = g_polyp_rho_inner;
+
+  // mass-flux reference at r_inner using the analytic state.
+  Real U_in, rho_in, p_in;
+  {
+    Real y_in = PolyParkerY(r_inner, rcrit, gpoly);
+    U_in   = ac * y_in;
+    rho_in = rho_inner;
+    p_in   = rhoc * ac*ac / gpoly *
+             std::pow(rho_in / rhoc, gpoly);
+  }
+  const Real mdot_ref = rho_in * U_in * r_inner * r_inner;
+  const Real cs_in = std::sqrt(gpoly * p_in / rho_in);
+  const int Ncell = (nmb1+1)*(ke-ks+1)*(je-js+1)*(ie-is+1);
+
+  Real l1_v = 0.0, l2_v = 0.0, linf_v = 0.0;
+  Real l1_rho = 0.0, l2_rho = 0.0, linf_rho = 0.0;
+  Real l1_p = 0.0, linf_p = 0.0;
+  Real l1_m = 0.0, linf_m = 0.0;
+  Real max_vt = 0.0, max_vp = 0.0;
+  Real max_bt = 0.0, max_bp = 0.0;
+  Real max_vperp = 0.0;
+  Kokkos::parallel_reduce("polyp_diag",
+    Kokkos::RangePolicy<>(DevExeSpace(), 0, Ncell),
+  KOKKOS_LAMBDA(const int idx,
+                Real &sv,  Real &sr,  Real &sp,  Real &sm,
+                Real &s2v, Real &s2r,
+                Real &mxv, Real &mxr, Real &mxp, Real &mxm,
+                Real &mvt, Real &mvp,
+                Real &mbt, Real &mbp,
+                Real &mvperp) {
+    int nx1 = ie - is + 1, nx2 = je - js + 1, nx3 = ke - ks + 1;
+    int nji = nx2 * nx1, nkji = nx3 * nx2 * nx1;
+    int m = idx / nkji;
+    int k = (idx - m*nkji) / nji;
+    int j = (idx - m*nkji - k*nji) / nx1;
+    int i = (idx - m*nkji - k*nji - j*nx1) + is;
+    k += ks; j += js;
+    Real r = geom.r_vol(m, i);
+    Real U_a, rho_a, p_a;
+    EvaluatePolytropicParker(r, rcrit, ac, gpoly, rhoc, &U_a, &rho_a, &p_a);
+    Real rho = u0(m, IDN, k, j, i);
+    Real vr = u0(m, IM1, k, j, i) / rho;
+    Real vt = u0(m, IM2, k, j, i) / rho;
+    Real vp = u0(m, IM3, k, j, i) / rho;
+    Real br = bcc(m, IBX, k, j, i);
+    Real btheta = bcc(m, IBY, k, j, i);
+    Real bphi   = bcc(m, IBZ, k, j, i);
+    Real ek = 0.5 * rho * (vr*vr + vt*vt + vp*vp);
+    Real eb = 0.5 * (br*br + btheta*btheta + bphi*bphi);
+    Real p  = (gpoly - 1.0) * (u0(m, IEN, k, j, i) - ek - eb);
+    Real mdot = rho * vr * r * r;
+    Real ev = Kokkos::fabs((vr - U_a) / U_a);
+    Real er = Kokkos::fabs((rho - rho_a) / rho_a);
+    Real ep = Kokkos::fabs((p - p_a) / p_a);
+    Real em = Kokkos::fabs((mdot - mdot_ref) / mdot_ref);
+    Real vperp = Kokkos::sqrt(vt*vt + vp*vp);
+    sv += ev; sr += er; sp += ep; sm += em;
+    s2v += ev*ev; s2r += er*er;
+    if (ev > mxv) mxv = ev;
+    if (er > mxr) mxr = er;
+    if (ep > mxp) mxp = ep;
+    if (em > mxm) mxm = em;
+    Real avt = Kokkos::fabs(vt), avp = Kokkos::fabs(vp);
+    Real abt = Kokkos::fabs(btheta), abp = Kokkos::fabs(bphi);
+    if (avt > mvt) mvt = avt;
+    if (avp > mvp) mvp = avp;
+    if (abt > mbt) mbt = abt;
+    if (abp > mbp) mbp = abp;
+    if (vperp > mvperp) mvperp = vperp;
+  }, l1_v, l1_rho, l1_p, l1_m, l2_v, l2_rho,
+     Kokkos::Max<Real>(linf_v),  Kokkos::Max<Real>(linf_rho),
+     Kokkos::Max<Real>(linf_p),  Kokkos::Max<Real>(linf_m),
+     Kokkos::Max<Real>(max_vt),  Kokkos::Max<Real>(max_vp),
+     Kokkos::Max<Real>(max_bt),  Kokkos::Max<Real>(max_bp),
+     Kokkos::Max<Real>(max_vperp));
+
+  l1_v   /= static_cast<Real>(Ncell);
+  l1_rho /= static_cast<Real>(Ncell);
+  l1_p   /= static_cast<Real>(Ncell);
+  l1_m   /= static_cast<Real>(Ncell);
+  l2_v = std::sqrt(l2_v / static_cast<Real>(Ncell));
+  l2_rho = std::sqrt(l2_rho / static_cast<Real>(Ncell));
+
+  DivBStats s = ComputeDivBStats(pmbp);
+  if (global_variable::my_rank == 0) {
+    std::cout.precision(6);
+    std::cout << std::scientific
+              << "[parker_polytropic] t              = " << pm->time << "\n"
+              << "[parker_polytropic] cs(r_inner)    = " << cs_in << "\n"
+              << "[parker_polytropic] mdot_ref       = " << mdot_ref << "\n"
+              << "[parker_polytropic] L1 |dv_r/v_r|  = " << l1_v << "\n"
+              << "[parker_polytropic] Linf|dv_r/v_r| = " << linf_v << "\n"
+              << "[parker_polytropic] L1 |drho/rho|  = " << l1_rho << "\n"
+              << "[parker_polytropic] Linf|drho/rho| = " << linf_rho << "\n"
+              << "[parker_polytropic] L1 |dp/p|      = " << l1_p << "\n"
+              << "[parker_polytropic] Linf|dp/p|     = " << linf_p << "\n"
+              << "[parker_polytropic] L1 |dmdot/mdot|= " << l1_m << "\n"
+              << "[parker_polytropic] Linf|dmdot|    = " << linf_m << "\n"
+              << "[parker_polytropic] max|v_theta|/cs= " << (max_vt/cs_in) << "\n"
+              << "[parker_polytropic] max|v_phi|/cs  = " << (max_vp/cs_in) << "\n"
+              << "[parker_polytropic] max|v_perp|/cs = " << (max_vperp/cs_in) << "\n"
+              << "[parker_polytropic] max|B_theta|/sqrt(rho_inner) = "
+              << (max_bt/std::sqrt(rho_inner)) << "\n"
+              << "[parker_polytropic] max|B_phi|/sqrt(rho_inner)   = "
+              << (max_bp/std::sqrt(rho_inner)) << std::endl;
+  }
+  PrintDivBStats("parker_polytropic", s);
+
+  // Optional radial-profile CSV. One row per radial cell on the central theta and
+  // phi indices (j=middle, k=middle). Reduces to a host array.
+  if (g_polyp_csv_dir.empty() || global_variable::my_rank != 0) return;
+  const std::string label = g_polyp_label.empty() ? std::string("default")
+                                                   : g_polyp_label;
+  const std::string csv_path = g_polyp_csv_dir + "/" + label + "_radial.csv";
+  const int j_mid = js + (je - js) / 2;
+  const int k_mid = ks + (ke - ks) / 2;
+  auto h_w0  = Kokkos::create_mirror_view(pmbp->pmhd->w0);
+  auto h_bcc = Kokkos::create_mirror_view(pmbp->pmhd->bcc0);
+  auto h_rv  = Kokkos::create_mirror_view(geom.r_vol);
+  auto h_rf  = Kokkos::create_mirror_view(geom.r_face);
+  Kokkos::deep_copy(h_w0,  pmbp->pmhd->w0);
+  Kokkos::deep_copy(h_bcc, pmbp->pmhd->bcc0);
+  Kokkos::deep_copy(h_rv,  geom.r_vol);
+  Kokkos::deep_copy(h_rf,  geom.r_face);
+  std::ofstream out(csv_path);
+  if (!out) {
+    std::cout << "WARNING: could not open " << csv_path << " for writing" << std::endl;
+    return;
+  }
+  out.precision(10);
+  out << std::scientific;
+  out << "r,rho,rho_an,rho_relerr,vr,vr_an,vr_relerr,p,p_an,p_relerr,"
+      << "mdot,mdot_an,mdot_relerr,B_r,B_r_an,vA_an,MA_an,v_perp\n";
+  for (int m = 0; m <= nmb1; ++m) {
+    for (int i = is; i <= ie; ++i) {
+      Real r = h_rv(m, i);
+      Real y = PolyParkerY(r, rcrit, gpoly);
+      Real U_a = ac * y;
+      Real rho_a = rhoc * ac * rcrit * rcrit / (U_a * r * r);
+      Real p_a = rhoc * ac * ac / gpoly * std::pow(rho_a / rhoc, gpoly);
+      Real br_an = B0_poly * (r_inner * r_inner) / (r * r);
+      Real vA_an = std::abs(br_an) / std::sqrt(rho_a);
+      Real MA_an = U_a / vA_an;
+      Real mdot_an = rho_a * U_a * r * r;
+      Real rho = h_w0(m, IDN, k_mid, j_mid, i);
+      Real vr  = h_w0(m, IVX, k_mid, j_mid, i);
+      Real vt  = h_w0(m, IVY, k_mid, j_mid, i);
+      Real vp  = h_w0(m, IVZ, k_mid, j_mid, i);
+      // AthenaK primitive IEN holds internal energy density: p = (gamma-1)*eint
+      Real p_num = (gpoly - 1.0) * h_w0(m, IEN, k_mid, j_mid, i);
+      Real br = h_bcc(m, IBX, k_mid, j_mid, i);
+      Real mdot = rho * vr * r * r;
+      Real vperp = std::sqrt(vt*vt + vp*vp);
+      out << r << ","
+          << rho << "," << rho_a << "," << (rho - rho_a)/rho_a << ","
+          << vr  << "," << U_a   << "," << (vr  - U_a  )/U_a   << ","
+          << p_num << "," << p_a << "," << (p_num - p_a)/p_a   << ","
+          << mdot << "," << mdot_an << "," << (mdot - mdot_an)/mdot_an << ","
+          << br << "," << br_an << ","
+          << vA_an << "," << MA_an << ","
+          << vperp << "\n";
+    }
+  }
+  out.close();
+  std::cout << "[parker_polytropic] wrote " << csv_path << std::endl;
 }
 
 }  // namespace

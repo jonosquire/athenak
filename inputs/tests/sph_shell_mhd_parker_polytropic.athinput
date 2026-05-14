@@ -1,0 +1,86 @@
+# AthenaK input: spherical-shell MHD polytropic Parker wind + radial monopole.
+#
+# Branch-safe ideal-gas Parker solution with gamma close to 1 (default 1.05).
+# Allows HLLD and LHLLD testing of a flowing background. See
+# tst/sph_test_summaries/monopole_lhlld_minimal_summary.md for context.
+#
+# Default parameters:
+#   GM=4, gamma_poly=1.05, rcrit=2, rho_inner=1, alfven_point_target=13.
+#   Derived: a_c = sqrt(GM/(2 rcrit)) = 1.0, r_inner = mesh.x1min = 1.
+#
+# Use CLI overrides for the test matrix, e.g.:
+#   mesh/nx1=512 meshblock/nx1=128 mhd/reconstruct=plm mhd/rsolver=hlld time/tlim=5
+#   problem/label=plm_hlld_nr512_t5  problem/csv_dir=poly_parker_mhd_validation/csv
+#
+# Build with -DPROBLEM=sph_shell_mhd.
+
+<comment>
+problem   = sph_shell_mhd / parker_polytropic
+
+<job>
+basename  = SphShellMHDParkerPoly
+
+<mesh>
+nghost    = 2
+
+nx1       = 512
+x1min     = 1.0
+x1max     = 20.0
+ix1_bc    = user
+ox1_bc    = user
+
+nx2       = 8
+x2min     = 1.5108
+x2max     = 1.6308               # thin equatorial tube, width 0.12
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 8
+x3min     = 0.0
+x3max     = 1.5707963267948966   # pi/2
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 128
+nx2       = 8
+nx3       = 8
+
+<coord>
+system          = spherical_shell
+verify_geometry = false
+
+<spherical_shell>
+radial_grid     = uniform
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = -1
+tlim       = 5.0
+ndiag      = 200
+
+<mhd>
+eos             = ideal
+gamma           = 1.05            # MUST match <problem>/gamma_poly
+reconstruct     = plm
+rsolver         = hlld
+
+<mhd_srcterms>
+r_inv_sq_gravity = true
+r_inv_sq_gm      = 4.0            # GM matching <problem>/GM
+
+<problem>
+mode                  = parker_polytropic
+gamma_poly            = 1.05
+GM                    = 4.0
+rcrit                 = 2.0
+rho_inner             = 1.0
+r_inner               = 1.0
+alfven_point_target   = 13.0
+outer_bc              = analytic
+label                 = default
+# csv_dir leave empty to disable radial-profile CSV.
+# Set to "poly_parker_mhd_validation/csv" for per-case dumps via CLI override.
+csv_dir               =

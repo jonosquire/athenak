@@ -902,6 +902,43 @@ bottom), one declaration in `coordinates.hpp`, and one block removal in
 `coordinates.cpp`. Hydro pgens, hydro tests, hydro plotting, and
 hydro-only validation files were not touched.
 
+### Task 4.2 additions: polytropic Parker MHD background
+
+Added to `sph_shell_mhd.cpp`:
+
+- New mode `parker_polytropic` — ideal-gas MHD (γ close to 1, default 1.05) Parker
+  wind plus radial monopole `B_r = B0 r_inner²/r²`. Critical-point
+  parameterisation: `a_c = sqrt(GM/(2 rcrit))`, `x = r/rcrit`, `y = U/a_c`.
+  Branch-safe bisection root solve on
+  `F(y, x; γ) = y²/2 + (1/(γ−1))·(1/(y x²))^(γ−1) − 2/x − (1/(γ−1) − 3/2)`;
+  subsonic for `r < rcrit`, supersonic for `r > rcrit`, `y=1` at `r=rcrit`.
+- `ρ_c` calibrated from mass conservation so `ρ(r_inner)=rho_inner`.
+- `B0` calibrated so the Alfvén point sits at `r = alfven_point_target`:
+  `B0 = U(rA)·√ρ(rA)·(rA/r_inner)²`.
+- Helper functions `PolyParkerF`, `PolyParkerY`,
+  `EvaluatePolytropicParker`, `EvaluatePolytropicParkerBrFace` are KOKKOS device
+  callable and shared between IC, user BC, and finalizer.
+- User radial BC `ParkerPolyMhdRadialBCs` imposes analytic ghosts (outer
+  BC selectable analytic/outflow). `B1f` is set from face-radius analytics.
+- `ParkerPolytropicFinalize` reports L1/Linf for ρ, v_r, p, mass flux,
+  transverse v/B normalised by c_s and √ρ_inner, divB stats. Optional
+  radial-profile CSV is written under `<problem>/csv_dir` if set.
+
+Compatible with **HLLD** and **LHLLD** (LHLLD is ideal-gas-only in this fork).
+This is the recommended flowing background for the next lower-boundary
+monochromatic Alfvén-wave driver test — see
+[`tst/sph_test_summaries/monopole_lhlld_minimal_summary.md`] for context on
+why the static monopole + HLLD path is not suitable for long quantitative
+runs.
+
+Default input `inputs/tests/sph_shell_mhd_parker_polytropic.athinput`:
+γ=1.05, GM=4, rcrit=2, rho_inner=1, r_inner=1, rA_target=13, r ∈ [1, 20],
+8×8 thin equatorial tube, uniform-r, ndiag=200, `tlim=5`. Local validation
+results, run script, and plot script live under `poly_parker_mhd_validation/`
+(gitignored). Baseline `plm_hlld_nr512` at `t=5` gives
+`max|v_⊥|/c_s ≈ 1.1e-12`, `divB L1 ≈ 1.2e-12`, with L1 radial errors
+`O(few × 10⁻³)` dominated by the inner boundary.
+
 ### Task 4.1 additions: radial Alfvén + equatorial field loop
 
 Two new pgen modes added to `sph_shell_mhd.cpp`:
