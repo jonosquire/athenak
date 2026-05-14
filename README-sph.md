@@ -580,7 +580,9 @@ B0 calibration, gravity source-term); the new pieces are:
   zones, and the corresponding face B is set as
   `B_perp = driver_b_sign · √ρ_inner · v_perp` (`b_sign = -1` drives the
   outgoing `z+ = v_perp − sign(B_r) B_perp/√ρ` branch). Default polarization
-  is `phi`; `theta` is also supported.
+  is `phi`; `theta` and `circular` are also supported. Circular drives
+  both transverse components (sin/cos pair) so that `|z+|` is constant in
+  time — recommended for envelope and WKB-tracking measurements.
 - **Outer boundary**: analytic Parker + monopole for ρ, p, U, `B_r`;
   zero-gradient/outflow copy of transverse v and face B (acceptable while
   the wedge is super-Alfvénic at the outer boundary).
@@ -611,8 +613,9 @@ driver_amp            = 0.0
 driver_omega          = 1.0
 driver_phase          = 0.0
 driver_ramp_time      = 2.0
-driver_polarization   = phi           # or "theta"
+driver_polarization   = phi           # "phi", "theta", or "circular" (k_perp=0)
 driver_b_sign         = -1.0          # -1 drives outgoing z+
+driver_circ_sign      = 1.0           # handedness for circular drive
 driver_ntheta         = 0             # k_perp=0 by default
 driver_nphi           = 0
 

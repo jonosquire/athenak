@@ -86,8 +86,9 @@ driver_amp            = 0.0
 driver_omega          = 1.0
 driver_phase          = 0.0
 driver_ramp_time      = 2.0
-driver_polarization   = phi
+driver_polarization   = phi       # "phi", "theta", or "circular" (k_perp=0)
 driver_b_sign         = -1.0
+driver_circ_sign      = 1.0       # only used when polarization=circular
 driver_ntheta         = 0
 driver_nphi           = 0
 driver_theta_phase    = 0.0

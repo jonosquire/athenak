@@ -45,8 +45,9 @@ Key `<problem>` parameters (full list in
 | `driver_omega`        | angular frequency                              |
 | `driver_phase`        | initial time phase                             |
 | `driver_ramp_time`    | half-`sin²` ramp duration                      |
-| `driver_polarization` | `phi` (default) or `theta`                     |
+| `driver_polarization` | `phi` (default), `theta`, or `circular` (k_perp=0) |
 | `driver_b_sign`       | -1 = outgoing z+ branch (default)              |
+| `driver_circ_sign`    | +1 / -1 handedness of the circular drive       |
 | `driver_ntheta`       | int, 0 = k_perp=0 in θ                          |
 | `driver_nphi`         | int, 0 = k_perp=0 in φ                          |
 | `snapshot_times`      | "1,2,3,4,5"                                    |
@@ -148,7 +149,64 @@ The split-out pgen reproduces the Task 4.2 background to within the
 machine-precision noise floor; both Elsasser branches sit at the same
 roundoff level.
 
-## 8. Driven-wave results
+## 8a. Driven-wave results — circular polarization (recommended)
+
+A linearly polarized monochromatic wave has |z+| that oscillates in r at
+fixed t (and in t at fixed r) because |v_perp| ∝ |sin(ω(t−τ_+))|. This makes
+per-snapshot envelope reads noisy and complicates resolution / reconstruction
+scans. The pgen therefore supports **circular polarization** as an
+alternative drive (only when k_perp = 0):
+
+```
+v_θ(t) = amp · ramp(t) · sin(ω t + φ)
+v_φ(t) = driver_circ_sign · amp · ramp(t) · cos(ω t + φ)
+B_θ,φ  = driver_b_sign · √ρ_inner · v_θ,φ
+```
+
+Then `|v_perp|² = v_θ² + v_φ²` is constant in t at each r, hence a smooth,
+single-valued envelope per snapshot.
+
+`aw_circ_plm_hlld_nr1024_w10` (Nr=1024, **amp = 1e-2, 10× larger than the
+linear test below**, ω=10, ramp=1, tlim=8, PLM + HLLD, circular polarization,
+~22 min on local CPU). Final state (`t = 8`, ~2.7 outward AW crossings):
+
+| diagnostic                       | value     |
+|----------------------------------|----------:|
+| max \|v_⊥\|/c_s                  | 2.73e-2   |
+| max \|B_θ\|/√ρ_inner             | 9.80e-3   |
+| max \|B_φ\|/√ρ_inner             | 4.58e-3   |
+| max \|z+\|                        | 5.79e-2   |
+| max \|z-\|                        | 2.76e-3   |
+| max \|z-\| / max \|z+\|           | 4.8 %     |
+| divB L1                          | 4.71e-13  |
+| L1 \|Δρ/ρ\|                      | 1.99e-3   |
+| L1 \|Δv_r/v_r\|                  | 7.45e-4   |
+| L1 \|Δṁ/ṁ\|                      | 1.88e-3   |
+
+Background-preservation errors match the no-wave control to the same
+precision; the wave is **linear** at this amplitude (ε/v_A ≈ 2e-3 at the
+inner boundary).
+
+**WKB tracking.** Anchoring the WKB envelope at the innermost radial cell
+(where the driver fixes |z+| = 2·amp = 2e-2 at full ramp), the simulation
+amplitude matches the WKB prediction
+`|z+|(r) = |z+|(r_min) · HO(r_min)/HO(r)`
+**to ~1–2 % across r ∈ [1, 20]** once the wave has filled (`t ≥ 4`). See
+`plots/aw_circ_plm_hlld_nr1024_w10_snapshots_zplus.png` — simulation
+envelope and WKB dashed line are visually overlapping.
+
+z-/z+ profile (see `aw_circ_plm_hlld_nr1024_w10_zminus_over_zplus.png`):
+
+- Smooth on log axes (was extremely spiky for the linear test).
+- ~0.1 right at the inner boundary cell.
+- ~0.01 across the bulk of the domain.
+- Time-stationary once the wave train fills (`t ≥ 4`).
+
+This is the configuration we recommend for any future resolution /
+reconstruction / Riemann-solver / amplitude / k_perp scans on the Parker
+background.
+
+## 8b. Driven-wave results — linear polarization (original test)
 
 `aw_plm_hlld_nr1024_w10` (Nr=1024, tlim=8, ~21 min on local CPU). Final
 state (`t = 8`, ~2.7 outward AW crossings):

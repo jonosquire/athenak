@@ -23,7 +23,14 @@
 //!   driver_omega         angular frequency
 //!   driver_phase         time phase
 //!   driver_ramp_time     half-sin^2 ramp time (0 = step on)
-//!   driver_polarization  "phi" (default) or "theta"
+//!   driver_polarization  "phi" (default), "theta", or "circular".
+//!                        "circular" requires ntheta = nphi = 0 (parallel only).
+//!                        Drives v_theta = amp ramp sin(omega t+phi),
+//!                               v_phi   = circ_sign * amp ramp cos(omega t+phi),
+//!                        so |v_perp| (and hence |z+|) is constant in time and
+//!                        the radial envelope is smooth -- useful for WKB
+//!                        envelope measurement.
+//!   driver_circ_sign     +-1 (default +1) handedness of the circular drive.
 //!   driver_b_sign        +-1 (default -1 = drives the outgoing z+ branch
 //!                              where z+ = v_perp - sign(B_r) B_perp/sqrt(rho))
 //!   driver_ntheta        integer mode in theta (default 0 -> k_perp=0)
@@ -94,8 +101,9 @@ static Real g_drv_omega       = 0.0;
 static Real g_drv_phase       = 0.0;
 static Real g_drv_ramp_time   = 0.0;
 static Real g_drv_start       = 0.0;
-static int  g_drv_pol         = 1;      // 1 = phi, 0 = theta
+static int  g_drv_pol         = 1;      // 1 = phi, 0 = theta, 2 = circular
 static Real g_drv_b_sign      = -1.0;   // -1 = outgoing z+ branch
+static Real g_drv_circ_sign   = 1.0;    // handedness for circular polarization
 static int  g_drv_ntheta      = 0;
 static int  g_drv_nphi        = 0;
 static Real g_drv_theta_phase = 0.0;
@@ -312,6 +320,7 @@ void ProblemGenerator::UserProblem(ParameterInput *pin, const bool restart) {
   g_drv_ramp_time   = pin->GetOrAddReal   ("problem", "driver_ramp_time", 0.0);
   g_drv_start       = pin->GetOrAddReal   ("problem", "driver_start", 0.0);
   g_drv_b_sign      = pin->GetOrAddReal   ("problem", "driver_b_sign", -1.0);
+  g_drv_circ_sign   = pin->GetOrAddReal   ("problem", "driver_circ_sign", 1.0);
   g_drv_ntheta      = pin->GetOrAddInteger("problem", "driver_ntheta", 0);
   g_drv_nphi        = pin->GetOrAddInteger("problem", "driver_nphi", 0);
   g_drv_theta_phase = pin->GetOrAddReal   ("problem", "driver_theta_phase", 0.0);
@@ -322,9 +331,19 @@ void ProblemGenerator::UserProblem(ParameterInput *pin, const bool restart) {
     g_drv_pol = 1;
   } else if (pol == "theta") {
     g_drv_pol = 0;
+  } else if (pol == "circular") {
+    g_drv_pol = 2;
+    if (g_drv_enable && (g_drv_ntheta != 0 || g_drv_nphi != 0)) {
+      std::cout << "### FATAL ERROR: driver_polarization=circular requires "
+                << "driver_ntheta = driver_nphi = 0 (parallel only). Got "
+                << "ntheta=" << g_drv_ntheta << ", nphi=" << g_drv_nphi
+                << std::endl;
+      std::exit(EXIT_FAILURE);
+    }
   } else {
-    std::cout << "### FATAL ERROR: driver_polarization must be 'phi' or 'theta'"
-              << ", got '" << pol << "'" << std::endl;
+    std::cout << "### FATAL ERROR: driver_polarization must be "
+              << "'phi', 'theta', or 'circular', got '" << pol << "'"
+              << std::endl;
     std::exit(EXIT_FAILURE);
   }
 
@@ -398,8 +417,12 @@ void ProblemGenerator::UserProblem(ParameterInput *pin, const bool restart) {
                 << "[parker_wind_aw] driver_omega   = " << g_drv_omega << "\n"
                 << "[parker_wind_aw] driver_ramp_t  = " << g_drv_ramp_time << "\n"
                 << "[parker_wind_aw] driver_polariz = " << pol << "\n"
-                << "[parker_wind_aw] driver_b_sign  = " << g_drv_b_sign << "\n"
-                << "[parker_wind_aw] driver_ntheta  = " << g_drv_ntheta << "\n"
+                << "[parker_wind_aw] driver_b_sign  = " << g_drv_b_sign << "\n";
+      if (g_drv_pol == 2) {
+        std::cout << "[parker_wind_aw] driver_circ_sign = "
+                  << g_drv_circ_sign << "\n";
+      }
+      std::cout << "[parker_wind_aw] driver_ntheta  = " << g_drv_ntheta << "\n"
                 << "[parker_wind_aw] driver_nphi    = " << g_drv_nphi << "\n";
     }
     std::cout << std::flush;
@@ -524,7 +547,10 @@ void ParkerAwRadialBCs(Mesh *pm) {
   const Real r_inn  = g_r_inner;
 
   // Driver state (host-side ramped amplitude). 0 unless enabled.
-  Real vdrv0 = 0.0;
+  // vdrv0   = amp * ramp * sin(arg)  -> theta component (or phi for "phi" pol)
+  // vdrv_c0 = circ_sign * amp * ramp * cos(arg)  -> phi component, circular only.
+  Real vdrv0   = 0.0;
+  Real vdrv_c0 = 0.0;
   if (g_drv_enable) {
     const Real tdrive = pm->time - g_drv_start;
     Real ramp = 0.0;
@@ -536,9 +562,12 @@ void ParkerAwRadialBCs(Mesh *pm) {
         ramp = 1.0;
       }
     }
-    vdrv0 = g_drv_amp * ramp * std::sin(g_drv_omega * tdrive + g_drv_phase);
+    const Real arg_t = g_drv_omega * tdrive + g_drv_phase;
+    vdrv0   = g_drv_amp * ramp * std::sin(arg_t);
+    vdrv_c0 = g_drv_amp * ramp * std::cos(arg_t) * g_drv_circ_sign;
   }
-  const Real bdrv0 = g_drv_b_sign * std::sqrt(g_rho_inner) * vdrv0;
+  const Real bdrv0   = g_drv_b_sign * std::sqrt(g_rho_inner) * vdrv0;
+  const Real bdrv_c0 = g_drv_b_sign * std::sqrt(g_rho_inner) * vdrv_c0;
   const int  pol     = g_drv_pol;
   const int  ntheta  = g_drv_ntheta;
   const int  nphi    = g_drv_nphi;
@@ -565,13 +594,19 @@ void ParkerAwRadialBCs(Mesh *pm) {
       Real phi   = 0.5 * (geom.phi_face(m, k) + geom.phi_face(m, k+1));
       Real ang = Kokkos::cos(two_pi*ntheta*(theta - th_min)*inv_dth + th_ph
                            + two_pi*nphi  *(phi   - ph_min)*inv_dph + ph_ph);
-      Real bdrv = bdrv0 * ang;
-      if (pol == 1) {           // phi polarization: drive B_phi
+      Real bdrv   = bdrv0 * ang;
+      Real bdrv_c = bdrv_c0 * ang;   // = bdrv_c0 (ang=1 when ntheta=nphi=0)
+      if (pol == 2) {           // circular: drive both B_theta (sin) and B_phi (cos)
+        b0.x2f(m, k, j, i) = bdrv;
+        if (j == n2-1) b0.x2f(m, k, j+1, i) = bdrv;
+        b0.x3f(m, k, j, i) = bdrv_c;
+        if (k == n3-1) b0.x3f(m, k+1, j, i) = bdrv_c;
+      } else if (pol == 1) {    // phi polarization: drive B_phi only
         b0.x2f(m, k, j, i) = 0.0;
         if (j == n2-1) b0.x2f(m, k, j+1, i) = 0.0;
         b0.x3f(m, k, j, i) = bdrv;
         if (k == n3-1) b0.x3f(m, k+1, j, i) = bdrv;
-      } else {                  // theta polarization: drive B_theta
+      } else {                  // theta polarization: drive B_theta only
         b0.x2f(m, k, j, i) = bdrv;
         if (j == n2-1) b0.x2f(m, k, j+1, i) = bdrv;
         b0.x3f(m, k, j, i) = 0.0;
@@ -606,11 +641,15 @@ void ParkerAwRadialBCs(Mesh *pm) {
       Real phi   = 0.5 * (geom.phi_face(m, k) + geom.phi_face(m, k+1));
       Real ang = Kokkos::cos(two_pi*ntheta*(theta - th_min)*inv_dth + th_ph
                            + two_pi*nphi  *(phi   - ph_min)*inv_dph + ph_ph);
-      Real vdrv = vdrv0 * ang;
-      Real bdrv = bdrv0 * ang;
+      Real vdrv   = vdrv0   * ang;
+      Real bdrv   = bdrv0   * ang;
+      Real vdrv_c = vdrv_c0 * ang;   // ang=1 for ntheta=nphi=0
+      Real bdrv_c = bdrv_c0 * ang;
       Real vth = 0.0, vph = 0.0, bth = 0.0, bph = 0.0;
-      if (pol == 1) { vph = vdrv; bph = bdrv; }
-      else          { vth = vdrv; bth = bdrv; }
+      if (pol == 2)      { vth = vdrv;   vph = vdrv_c;
+                           bth = bdrv;   bph = bdrv_c; }
+      else if (pol == 1) { vph = vdrv;   bph = bdrv; }
+      else               { vth = vdrv;   bth = bdrv; }
       Real br_cc = 0.5 * (b0.x1f(m, k, j, i) + b0.x1f(m, k, j, i+1));
       Real eb = 0.5 * (br_cc*br_cc + bth*bth + bph*bph);
       u0(m, IDN, k, j, i) = rho;
