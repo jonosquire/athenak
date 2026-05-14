@@ -62,3 +62,6 @@ compile_commands.json
 
 # Local development scratch (Task 4.2 polytropic Parker)
 poly_parker_mhd_validation/
+
+# Local development scratch (Task 4.3 parker_wind_aw monochromatic AW driver)
+parker_aw_validation/

@@ -567,6 +567,66 @@ Baseline (`plm_hlld_nr512`, `t=5`): `max|v_⊥|/c_s ≈ 1e-12`, divB L1 ≈ 1e-1
 The polytropic Parker is therefore the recommended quiet flowing background
 for the next-task lower-radial-boundary monochromatic Alfvén-wave driver.
 
+**Polytropic Parker monochromatic AW (Task 4.3, `parker_wind_aw`)**:
+
+Split-out, AW-driver-extended version of `parker_polytropic` from the general
+`sph_shell_mhd` pgen. Build with `-DPROBLEM=parker_wind_aw`. Background
+construction is byte-identical with the Task 4.2 mode (same bisection,
+B0 calibration, gravity source-term); the new pieces are:
+
+- A lower-radial-boundary **monochromatic Alfvén-wave driver** with a smooth
+  sin² ramp. Transverse velocity perturbation
+  `v_perp(t) = amp · ramp(t) · sin(ω t + φ)` is imposed in the inner ghost
+  zones, and the corresponding face B is set as
+  `B_perp = driver_b_sign · √ρ_inner · v_perp` (`b_sign = -1` drives the
+  outgoing `z+ = v_perp − sign(B_r) B_perp/√ρ` branch). Default polarization
+  is `phi`; `theta` is also supported.
+- **Outer boundary**: analytic Parker + monopole for ρ, p, U, `B_r`;
+  zero-gradient/outflow copy of transverse v and face B (acceptable while
+  the wedge is super-Alfvénic at the outer boundary).
+- **Optional angular mode**: `driver_ntheta`, `driver_nphi` integers default
+  to 0 (pure parallel `k_perp = 0`). Nonzero values multiply the boundary
+  amplitude by `cos(2π n_θ θ̃ + 2π n_φ φ̃ + phases)` with θ̃, φ̃ normalized
+  to the box.
+- **Diagnostics**: at IC, the pgen writes
+  `<csv_dir>/<label>_background_wkb.csv` (analytic profile + `HO_factor`,
+  `z_wkb_rel`, `action_proxy_rel`, `energy_flux_proxy_rel`) and a t=0 wave
+  profile. At a user-listed `problem/snapshot_times` and at finalize, it
+  writes radial wave profiles
+  `<csv_dir>/<label>_wave_profile_t<idx>.csv` containing rho, p, U, B_r,
+  v_⊥, B_⊥, z+, z-, and per-radius angular RMS scatter.
+
+Key parameters (under `<problem>`):
+
+```ini
+gamma_poly            = 1.05          # must match <mhd>/gamma
+GM                    = 4.0           # must match <mhd_srcterms>/r_inv_sq_gm
+rcrit                 = 2.0
+rho_inner             = 1.0
+alfven_point_target   = 13.0
+r_ref                 = 2.0           # WKB normalization radius
+
+driver_enable         = false
+driver_amp            = 0.0
+driver_omega          = 1.0
+driver_phase          = 0.0
+driver_ramp_time      = 2.0
+driver_polarization   = phi           # or "theta"
+driver_b_sign         = -1.0          # -1 drives outgoing z+
+driver_ntheta         = 0             # k_perp=0 by default
+driver_nphi           = 0
+
+snapshot_times        = "1,2,3,4,5,6"
+csv_dir               = parker_aw_validation/csv
+label                 = aw_default
+```
+
+Default input: `inputs/tests/parker_wind_aw.athinput`. Local validation
+outputs (logs, CSVs, plots) live under `parker_aw_validation/` (gitignored).
+The first sanity-check test (`aw_plm_hlld_nr1024_w10`, `amp=1e-3`,
+`ω=10`, tlim=8, Nr=1024) is documented in
+`tst/sph_test_summaries/parker_wind_aw_summary.md`.
+
 ### MHD known limitations
 
 - **GPU validation is still targeted.** A100 CUDA smoke and native-bin vibe

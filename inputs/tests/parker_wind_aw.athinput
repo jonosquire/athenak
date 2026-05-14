@@ -1,0 +1,99 @@
+# AthenaK input: polytropic Parker MHD background + optional lower-radial
+# monochromatic Alfven-wave driver. Build with -DPROBLEM=parker_wind_aw.
+#
+# This pgen is the split-out, AW-driver-extended version of the parker_polytropic
+# mode that previously lived in sph_shell_mhd.cpp. See
+# tst/sph_test_summaries/poly_parker_mhd_summary.md for the no-wave validation.
+#
+# Defaults below: background only (driver_enable=false). To enable the driver
+# override on the command line, e.g.:
+#   problem/driver_enable=true problem/driver_amp=1e-3 problem/driver_omega=1.0 \
+#     problem/driver_ramp_time=2.0 problem/snapshot_times="2,4,6,8,10"
+#
+# Sign convention: with B_r > 0 and driver_b_sign = -1 (default), the driver
+# excites the outgoing branch z+ = v_perp - sign(B_r) B_perp/sqrt(rho).
+
+<comment>
+problem   = parker_wind_aw
+
+<job>
+basename  = ParkerWindAW
+
+<mesh>
+nghost    = 2
+
+nx1       = 1024
+x1min     = 1.0
+x1max     = 20.0
+ix1_bc    = user
+ox1_bc    = user
+
+nx2       = 8
+x2min     = 1.5108
+x2max     = 1.6308               # thin equatorial tube, width 0.12
+ix2_bc    = outflow
+ox2_bc    = outflow
+
+nx3       = 8
+x3min     = 0.0
+x3max     = 1.5707963267948966   # pi/2
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 128
+nx2       = 8
+nx3       = 8
+
+<coord>
+system          = spherical_shell
+verify_geometry = false
+
+<spherical_shell>
+radial_grid     = uniform
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = -1
+tlim       = 12.0
+ndiag      = 200
+
+<mhd>
+eos             = ideal
+gamma           = 1.05            # MUST match <problem>/gamma_poly
+reconstruct     = plm
+rsolver         = hlld
+
+<mhd_srcterms>
+r_inv_sq_gravity = true
+r_inv_sq_gm      = 4.0            # GM matching <problem>/GM
+
+<problem>
+# Background -----------------------------------------------------------------
+gamma_poly            = 1.05
+GM                    = 4.0
+rcrit                 = 2.0
+rho_inner             = 1.0
+r_inner               = 1.0
+alfven_point_target   = 13.0
+r_ref                 = 2.0
+
+# Driver ---------------------------------------------------------------------
+driver_enable         = false
+driver_amp            = 0.0
+driver_omega          = 1.0
+driver_phase          = 0.0
+driver_ramp_time      = 2.0
+driver_polarization   = phi
+driver_b_sign         = -1.0
+driver_ntheta         = 0
+driver_nphi           = 0
+driver_theta_phase    = 0.0
+driver_phi_phase      = 0.0
+
+# Output ---------------------------------------------------------------------
+label                 = default
+csv_dir               =
+snapshot_times        =

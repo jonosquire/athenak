@@ -902,6 +902,50 @@ bottom), one declaration in `coordinates.hpp`, and one block removal in
 `coordinates.cpp`. Hydro pgens, hydro tests, hydro plotting, and
 hydro-only validation files were not touched.
 
+### Task 4.3 additions: monochromatic AW driver on the polytropic Parker MHD background
+
+Split the Task 4.2 polytropic Parker MHD background out of `sph_shell_mhd.cpp`
+into a dedicated pgen file `src/pgen/parker_wind_aw.cpp`. The general spherical
+MHD pgen is unchanged; the new pgen reuses the same branch-safe bisection +
+B0-calibration construction and adds:
+
+- **Lower-x1 transverse AW driver** in user BCs:
+  `v_perp(t) = amp · ramp(t) · sin(ω t + φ) · cos(2π n_θ θ̃ + 2π n_φ φ̃ + …)`
+  imposed in inner ghost zones, with face B set as
+  `B_perp = driver_b_sign · √ρ_inner · v_perp` (`b_sign = -1` drives the
+  outgoing `z+ = v_perp − sign(B_r) B_perp/√ρ` branch). Default polarization
+  is `phi`; ramp is `sin²(π/2 · t/ramp_time)`. Defaults to `k_perp = 0`.
+- **Outer-x1 boundary**: analytic Parker + monopole for ρ, p, U, `B_r`;
+  zero-gradient/outflow copy of transverse v and face B (acceptable while
+  the wedge stays super-Alfvénic at the outer boundary).
+- **Background + WKB CSV** at IC: dense uniform-r profile with U, a, vA, MA,
+  U+vA, `tau_plus(r)`, `HO_factor = √MA + 1/√MA`, `z_wkb_rel = HO(r_ref)/HO(r)`,
+  area-weighted `energy_flux_proxy_rel`, `action_proxy_rel`.
+- **Wave-profile CSV snapshots** at user-listed `problem/snapshot_times` and
+  at finalize: radial profile on the central (j,k) cell with ρ, p, U, B_r, B_θ,
+  B_φ, v_perp, B_perp, z+, z-, `Bperp_over_sqrt_rho`, plus per-radius angular
+  RMS scatter `std_vperp`, `std_Bperp`.
+- **Snapshot dispatcher** lives inside `user_bcs_func`: gates on
+  `pm->time >= g_snap_times[idx]`. Robust against multi-substage calls within
+  one cycle because pm->time only advances between cycles. Note: at the time
+  `user_bcs_func` runs in the task list, `w0`/`bcc0` are from the previous
+  substage (ConsToPrim runs *after* BCs), so snapshot primitives are at
+  most one RK substage stale — negligible for the linear-amplitude tests
+  done in Task 4.3.
+
+Build with `-DPROBLEM=parker_wind_aw`. Default input
+`inputs/tests/parker_wind_aw.athinput` defaults to `driver_enable=false` so it
+reproduces the Task 4.2 background; enable the driver via CLI overrides.
+
+Local validation results (logs, CSVs, plots) live under
+`parker_aw_validation/` (gitignored). A concise human-readable summary is at
+`tst/sph_test_summaries/parker_wind_aw_summary.md`. The first sanity-check
+case is `aw_plm_hlld_nr1024_w10` (PLM + HLLD, Nr=1024, amp=1e-3, ω=10,
+ramp_time=1, tlim=8). The matching no-wave control reproduces the Task 4.2
+baseline (`L1|drho/rho| = 8.23e-3`, `max|v_⊥|/c_s ≈ 1.3e-12`, divB at
+roundoff) to within the floor, confirming the split did not break the
+background.
+
 ### Task 4.2 additions: polytropic Parker MHD background
 
 Added to `sph_shell_mhd.cpp`:
