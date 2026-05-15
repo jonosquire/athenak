@@ -10,6 +10,8 @@
 #include "parameter_input.hpp"
 #include "mesh/mesh.hpp"
 #include "mhd/mhd.hpp"
+#include "coordinates/coordinates.hpp"
+#include "coordinates/spherical_shell.hpp"
 #include "eos.hpp"
 
 //----------------------------------------------------------------------------------------
@@ -79,6 +81,12 @@ void IsothermalMHD::ConsToPrim(DvceArray5D<Real> &cons, const DvceFaceFld4D<Real
   auto &fofc_ = pmy_pack->pmhd->fofc;
   Real dfloor = eos_data.dfloor;
   Real sigma_max = eos_data.sigma_max;
+  // Spherical-shell volume-weighted face-to-cell-centre interpolation
+  // (matches Athena++ Field::CalculateCellCenteredField). See ideal_mhd.cpp
+  // and mhd_newdt.cpp for the same shell_geom capture pattern.
+  const bool is_spherical = (pmy_pack->pcoord->coord_system ==
+                             CoordinateSystem::spherical_shell);
+  auto geom = pmy_pack->pcoord->shell_geom;
 
   const int ni   = (iu - il + 1);
   const int nji  = (ju - jl + 1)*ni;
@@ -102,11 +110,23 @@ void IsothermalMHD::ConsToPrim(DvceArray5D<Real> &cons, const DvceFaceFld4D<Real
     u.my = cons(m,IM2,k,j,i);
     u.mz = cons(m,IM3,k,j,i);
 
-    // load cell-centered fields into conserved state
-    // (simple linear average of face-centered fields)
-    u.bx = 0.5*(b.x1f(m,k,j,i) + b.x1f(m,k,j,i+1));
-    u.by = 0.5*(b.x2f(m,k,j,i) + b.x2f(m,k,j+1,i));
-    u.bz = 0.5*(b.x3f(m,k,j,i) + b.x3f(m,k+1,j,i));
+    // load cell-centered fields into conserved state. For spherical_shell
+    // use linear interp through the Mignone-2014 volume-weighted centroid
+    // (r_vol, theta_vol); for Cartesian the simple 0.5 average.
+    if (is_spherical) {
+      // Linear interp through the Mignone-2014 volume-weighted centroid.
+      // Weights bcc_wx1, bcc_wx2 are precomputed at geometry setup so the
+      // per-cell kernel has no division (GPU-friendly).
+      const Real wlo1 = geom.bcc_wx1(m, i);
+      u.bx = wlo1 * b.x1f(m,k,j,i) + (1.0 - wlo1) * b.x1f(m,k,j,i+1);
+      const Real wlo2 = geom.bcc_wx2(m, j);
+      u.by = wlo2 * b.x2f(m,k,j,i) + (1.0 - wlo2) * b.x2f(m,k,j+1,i);
+      u.bz = 0.5*(b.x3f(m,k,j,i) + b.x3f(m,k+1,j,i));
+    } else {
+      u.bx = 0.5*(b.x1f(m,k,j,i) + b.x1f(m,k,j,i+1));
+      u.by = 0.5*(b.x2f(m,k,j,i) + b.x2f(m,k,j+1,i));
+      u.bz = 0.5*(b.x3f(m,k,j,i) + b.x3f(m,k+1,j,i));
+    }
 
     // call c2p function
     const Real b2 = SQR(u.bx) + SQR(u.by) + SQR(u.bz);

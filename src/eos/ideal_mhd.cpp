@@ -8,6 +8,8 @@
 
 #include "athena.hpp"
 #include "mhd/mhd.hpp"
+#include "coordinates/coordinates.hpp"
+#include "coordinates/spherical_shell.hpp"
 #include "eos.hpp"
 #include "eos/ideal_c2p_mhd.hpp"
 
@@ -39,6 +41,14 @@ void IdealMHD::ConsToPrim(DvceArray5D<Real> &cons, const DvceFaceFld4D<Real> &b,
   int &nmb = pmy_pack->nmb_thispack;
   auto &eos = eos_data;
   auto &fofc_ = pmy_pack->pmhd->fofc;
+  // Spherical-shell volume-weighted face-to-cell-centre interpolation
+  // (matches Athena++ Field::CalculateCellCenteredField). For Cartesian the
+  // simple 0.5 average is used. `geom` is safe to capture unconditionally
+  // because we only access its arrays inside the `is_spherical` branch;
+  // see mhd_newdt.cpp for the same pattern.
+  const bool is_spherical = (pmy_pack->pcoord->coord_system ==
+                             CoordinateSystem::spherical_shell);
+  auto geom = pmy_pack->pcoord->shell_geom;
 
   const int ni   = (iu - il + 1);
   const int nji  = (ju - jl + 1)*ni;
@@ -69,7 +79,21 @@ void IdealMHD::ConsToPrim(DvceArray5D<Real> &cons, const DvceFaceFld4D<Real> &b,
       u.bx = bcc(m,IBX,k,j,i);
       u.by = bcc(m,IBY,k,j,i);
       u.bz = bcc(m,IBZ,k,j,i);
-    // else use simple linear average of face-centered fields
+    // else use linear interpolation of face-centered fields. For
+    // spherical_shell the interpolation point is the Mignone-2014
+    // volume-weighted centroid (r_vol, theta_vol); for Cartesian we fall
+    // back to the simple 0.5-average.
+    } else if (is_spherical) {
+      // Linear interp through the Mignone-2014 volume-weighted centroid.
+      // Weights bcc_wx1, bcc_wx2 are precomputed at geometry setup so the
+      // per-cell kernel has no division (GPU-friendly).
+      const Real wlo1 = geom.bcc_wx1(m, i);
+      u.bx = wlo1 * b.x1f(m,k,j,i) + (1.0 - wlo1) * b.x1f(m,k,j,i+1);
+      const Real wlo2 = geom.bcc_wx2(m, j);
+      u.by = wlo2 * b.x2f(m,k,j,i) + (1.0 - wlo2) * b.x2f(m,k,j+1,i);
+      // phi: dV ~ dphi so phi_center = 0.5(phi_- + phi_+) is the right
+      // volume centroid; the standard 0.5 average is already correct.
+      u.bz = 0.5*(b.x3f(m,k,j,i) + b.x3f(m,k+1,j,i));
     } else {
       u.bx = 0.5*(b.x1f(m,k,j,i) + b.x1f(m,k,j,i+1));
       u.by = 0.5*(b.x2f(m,k,j,i) + b.x2f(m,k,j+1,i));

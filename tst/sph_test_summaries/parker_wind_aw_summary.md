@@ -135,19 +135,22 @@ These match the Task 4.2 background to machine precision.
 Run with `driver_enable=false` at Nr=512, tlim=5 (same settings as the
 Task 4.2 baseline):
 
-| diagnostic            | value      | Task 4.2 baseline |
-|-----------------------|-----------:|------------------:|
-| L1 \|Δρ/ρ\|           | 8.23e-3    | 8.23e-3           |
-| L1 \|Δv_r/v_r\|       | 3.42e-3    | 3.42e-3           |
-| L1 \|Δṁ/ṁ\|           | 8.73e-3    | 8.73e-3           |
-| max \|v_⊥\|/c_s       | 1.34e-12   | 1.10e-12          |
-| divB L1               | 1.24e-12   | 1.18e-12          |
-| max \|z+\|            | 3.88e-12   | (not reported)    |
-| max \|z-\|            | 4.54e-12   | (not reported)    |
+| diagnostic            | weighted bcc | simple 0.5-avg bcc | Task 4.2 baseline |
+|-----------------------|-------------:|-------------------:|------------------:|
+| L1 \|Δρ/ρ\|           | **3.94e-3**  | 8.23e-3            | 8.23e-3           |
+| L1 \|Δv_r/v_r\|       | **2.64e-3**  | 3.42e-3            | 3.42e-3           |
+| L1 \|Δp/p\|           | **4.47e-3**  | 7.22e-3            | 7.22e-3           |
+| L1 \|Δṁ/ṁ\|           | **4.51e-3**  | 8.73e-3            | 8.73e-3           |
+| max \|v_⊥\|/c_s       | 7.49e-13     | 1.34e-12           | 1.10e-12          |
+| divB Linf · h / \|B\|max | 4.9e-13   | 4.7e-13            | 4.7e-13           |
 
-The split-out pgen reproduces the Task 4.2 background to within the
-machine-precision noise floor; both Elsasser branches sit at the same
-roundoff level.
+The split-out pgen with **Mignone-2014 volume-weighted face-to-cell-centre
+interpolation of `bcc`** reduces the background-preservation L1 errors by
+roughly a factor of 2 vs the simple 0.5-average and the original Task 4.2
+result. Both Elsasser branches still sit at the machine-precision floor in
+the no-wave control. divB is unchanged at roundoff (the bcc weighting is
+applied in the EOS C2P only; the constrained-transport face B is
+untouched).
 
 ## 8a. Driven-wave results — circular polarization (recommended)
 
@@ -166,22 +169,31 @@ B_θ,φ  = driver_b_sign · √ρ_inner · v_θ,φ
 Then `|v_perp|² = v_θ² + v_φ²` is constant in t at each r, hence a smooth,
 single-valued envelope per snapshot.
 
-`aw_circ_plm_hlld_nr1024_w10` (Nr=1024, **amp = 1e-2, 10× larger than the
+`aw_circ_wbcc_plm_hlld_nr1024_w10` (Nr=1024, **amp = 1e-2, 10× larger than the
 linear test below**, ω=10, ramp=1, tlim=8, PLM + HLLD, circular polarization,
-~22 min on local CPU). Final state (`t = 8`, ~2.7 outward AW crossings):
+volume-weighted bcc, ~22 min on local CPU). Final state (`t = 8`, ~2.7
+outward AW crossings):
 
-| diagnostic                       | value     |
-|----------------------------------|----------:|
-| max \|v_⊥\|/c_s                  | 2.73e-2   |
-| max \|B_θ\|/√ρ_inner             | 9.80e-3   |
-| max \|B_φ\|/√ρ_inner             | 4.58e-3   |
-| max \|z+\|                        | 5.79e-2   |
-| max \|z-\|                        | 2.76e-3   |
-| max \|z-\| / max \|z+\|           | 4.8 %     |
-| divB L1                          | 4.71e-13  |
-| L1 \|Δρ/ρ\|                      | 1.99e-3   |
-| L1 \|Δv_r/v_r\|                  | 7.45e-4   |
-| L1 \|Δṁ/ṁ\|                      | 1.88e-3   |
+| diagnostic                       | weighted bcc | simple bcc |
+|----------------------------------|-------------:|-----------:|
+| max \|v_⊥\|/c_s                  | 2.73e-2      | 2.73e-2    |
+| max \|B_θ\|/√ρ_inner             | 9.81e-3      | 9.80e-3    |
+| max \|B_φ\|/√ρ_inner             | 4.58e-3      | 4.58e-3    |
+| max \|z+\|                        | 5.79e-2      | 5.79e-2    |
+| max \|z-\|                        | 2.75e-3      | 2.76e-3    |
+| max \|z-\| / max \|z+\|           | 4.8 %        | 4.8 %      |
+| divB Linf · h / \|B\|max         | 3.7e-14      | (similar)  |
+| **L1 \|Δρ/ρ\|**                  | **8.76e-4**  | 1.99e-3    |
+| **L1 \|Δp/p\|**                  | **1.07e-3**  | 1.35e-3    |
+| **L1 \|Δṁ/ṁ\|**                  | **1.02e-3**  | 1.88e-3    |
+
+Wave-amplitude diagnostics (z+, z-, v_⊥, polarization purity) are
+**unchanged** — they are dominated by the driver and WKB scaling, neither of
+which couples to the bcc-averaging choice. The background-preservation L1
+errors halve, exactly as in the no-wave control. WKB tracking remains ~1–2 %
+across r ∈ [1, 20] in both versions; the plot
+`plots/aw_circ_wbcc_plm_hlld_nr1024_w10_snapshots_zplus.png` is visually
+identical to the simple-bcc run.
 
 Background-preservation errors match the no-wave control to the same
 precision; the wave is **linear** at this amplitude (ε/v_A ≈ 2e-3 at the

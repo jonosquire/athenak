@@ -103,6 +103,13 @@ struct SphericalShellGeom {
   //            (-rho v_r v_theta / r) and (-rho v_r v_phi / r) source terms
   DvceArray2D<Real> coord_src1_i;     // (nmb, nc1)
   DvceArray2D<Real> coord_src2_i;     // (nmb, nc1)
+  // Precomputed linear-interpolation weight on the LOWER (i) radial face used
+  // to build bcc1 from b.x1f via
+  //   bcc1(m, i) = bcc_wx1(m, i) * b.x1f(m, i) + (1 - bcc_wx1(m, i)) * b.x1f(m, i+1)
+  // i.e. bcc_wx1 = (r_face(i+1) - r_vol(i)) / (r_face(i+1) - r_face(i)).
+  // This matches Athena++ Field::CalculateCellCenteredField with volume-weighted
+  // x1v. Precomputed once at setup so the per-cell EOS kernel has no division.
+  DvceArray2D<Real> bcc_wx1;          // (nmb, nc1)
 
   // theta-direction (size nc2 or nc2+1 in the j-dimension)
   DvceArray2D<Real> theta_face;       // theta_{j-1/2}                         (nmb, nc2+1)
@@ -118,6 +125,9 @@ struct SphericalShellGeom {
   //            (-rho v_theta v_phi cot(theta) / r) source term
   DvceArray2D<Real> coord_src1_j;     // (nmb, nc2)
   DvceArray2D<Real> coord_src2_j;     // (nmb, nc2)
+  // Precomputed linear-interpolation weight on the LOWER (j) theta face used
+  // to build bcc2 from b.x2f. Same convention as bcc_wx1 above.
+  DvceArray2D<Real> bcc_wx2;          // (nmb, nc2)
 
   // phi-direction (size nc3 or nc3+1 in the k-dimension)
   DvceArray2D<Real> phi_face;         // phi_{k-1/2}                           (nmb, nc3+1)

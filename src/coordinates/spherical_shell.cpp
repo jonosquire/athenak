@@ -91,6 +91,7 @@ void ConstructSphericalShellGeometry(MeshBlockPack *ppack,
   Kokkos::realloc(geom.inv_dr3_third,  nmb, nc1);
   Kokkos::realloc(geom.coord_src1_i,   nmb, nc1);
   Kokkos::realloc(geom.coord_src2_i,   nmb, nc1);
+  Kokkos::realloc(geom.bcc_wx1,        nmb, nc1);
 
   Kokkos::realloc(geom.theta_face,     nmb, nc2+1);
   Kokkos::realloc(geom.theta_vol,      nmb, nc2);
@@ -100,6 +101,7 @@ void ConstructSphericalShellGeometry(MeshBlockPack *ppack,
   Kokkos::realloc(geom.dcos_theta,     nmb, nc2);
   Kokkos::realloc(geom.coord_src1_j,   nmb, nc2);
   Kokkos::realloc(geom.coord_src2_j,   nmb, nc2);
+  Kokkos::realloc(geom.bcc_wx2,        nmb, nc2);
 
   Kokkos::realloc(geom.phi_face,       nmb, nc3+1);
   Kokkos::realloc(geom.phi_center,     nmb, nc3);
@@ -253,6 +255,7 @@ void ConstructSphericalShellGeometry(MeshBlockPack *ppack,
 
   auto src1_i = geom.coord_src1_i;
   auto src2_i = geom.coord_src2_i;
+  auto bcc_wx1 = geom.bcc_wx1;
 
   par_for("sph_geom_rcells", DevExeSpace(), 0, nmb1, 0, nc1-1,
   KOKKOS_LAMBDA(int m, int i) {
@@ -273,13 +276,18 @@ void ConstructSphericalShellGeometry(MeshBlockPack *ppack,
     // (Mignone 2014 eq. 17). This reduces to (rp+rm)/2 in the small-dr limit.
     Real num = 0.75 * (rp2*rp2 - rm2*rm2);
     Real den = (rp3 - rm3);
-    r_vol(m, i) = num / den;
+    Real rv = num / den;
+    r_vol(m, i) = rv;
     // Athena++ source-term factors (see srcpp/coordinates/spherical_polar.cpp).
     //   src1_i = dr2_half / vol_i  -- area2/vol, "<2/r>/2"-like
     //   src2_i = dr / ((rm+rp) * vol_i)  -- normalises flux-area-weighted radial
     //   fluxes for the (-rho v_r v_t / r) and (-rho v_r v_p / r) source terms.
     src1_i(m, i) = dr2h / v_i;
     src2_i(m, i) = drv  / ((rm + rp) * v_i);
+    // bcc_wx1(m, i) = (rp - rv) / (rp - rm)  -- precomputed weight on the
+    // LOWER face for face-to-cell-centre linear interpolation of B_r used in
+    // EOS ConsToPrim (no division in the per-cell kernel).
+    bcc_wx1(m, i) = (rp - rv) / drv;
   });
 
   // ---- theta-direction ----
@@ -292,6 +300,7 @@ void ConstructSphericalShellGeometry(MeshBlockPack *ppack,
 
   auto src1_j = geom.coord_src1_j;
   auto src2_j = geom.coord_src2_j;
+  auto bcc_wx2 = geom.bcc_wx2;
 
   if (multi_d) {
     par_for("sph_geom_thfaces", DevExeSpace(), 0, nmb1, 0, nc2,
@@ -325,6 +334,9 @@ void ConstructSphericalShellGeometry(MeshBlockPack *ppack,
       //            for the (-rho v_t v_p cot/r) source term on phi momentum.
       src1_j(m, j) = (sp - sm) / dcos;
       src2_j(m, j) = (sp - sm) / ((sm + sp) * dcos);
+      // bcc_wx2(m, j) = (tp - theta_vol) / (tp - tm) -- precomputed weight on
+      // the LOWER face for face-to-cell-centre interpolation of B_theta.
+      bcc_wx2(m, j) = (tp - theta_vol(m, j)) / (tp - tm);
     });
   } else {
     // 1D: theta range is the full [x2min, x2max] of the mesh, but only one cell.
@@ -346,6 +358,7 @@ void ConstructSphericalShellGeometry(MeshBlockPack *ppack,
       sin_theta_vol(m, 0)  = Kokkos::sin(theta_vol(m, 0));
       src1_j(m, 0) = (sp - sm) / dcos;
       src2_j(m, 0) = (sp - sm) / ((sm + sp) * dcos);
+      bcc_wx2(m, 0) = (tp - theta_vol(m, 0)) / (tp - tm);
     });
   }
 
