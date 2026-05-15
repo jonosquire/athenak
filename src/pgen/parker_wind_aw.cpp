@@ -12,10 +12,17 @@
 //! Alfven-wave propagation tests on the Parker wind.
 //!
 //! Background (parameters via <problem>):
-//!   gamma_poly, GM, rcrit, rho_inner, r_inner, alfven_point_target
+//!   gamma_poly, GM, rcrit, rho_inner, r_inner
 //!   - Branch-safe bisection for the polytropic Parker U(r), rho(r), p(r).
-//!   - Radial monopole B_r = B0 r_inner^2/r^2 calibrated to put the Alfven
-//!     point at r = alfven_point_target.
+//!   - Radial monopole B_r = B0 r_inner^2/r^2. B0 is selected by B0_mode:
+//!       B0_mode = "alfven_point" (default): B0 chosen so M_A=1 at
+//!                  r = alfven_point_target.
+//!       B0_mode = "beta_inner"            : B0 = sqrt(2 p_inner / beta_inner)
+//!                  (code units, magnetic pressure = B^2/2).
+//!     The radial monopole carries no current away from r=0, so changing the
+//!     B0 calibration only rescales the magnetic / Alfvenic background
+//!     quantities (B_r, v_A, M_A, beta); the hydrodynamic Parker solution
+//!     (rho(r), p(r), U(r)) is independent of B0.
 //!
 //! Driver (also via <problem>):
 //!   driver_enable        true/false
@@ -91,8 +98,12 @@ static Real g_r_inner      = 1.0;
 static Real g_rho_c        = 1.0;       // density normalization
 static Real g_K_poly       = 1.0;       // p = K rho^gamma
 static Real g_rA_target    = 13.0;
+static Real g_beta_inner   = 1.0;       // requested plasma beta at r_inner (B0_mode=beta_inner)
 static Real g_B0           = 0.5;       // radial monopole strength at r_inner
 static Real g_r_ref        = 2.0;       // WKB reference radius
+// B0 calibration mode: 0 = alfven_point (B0 from alfven_point_target),
+//                      1 = beta_inner   (B0 = sqrt(2 p_inner / beta_inner)).
+static int  g_B0_mode      = 0;
 
 // ---------- Driver parameters ------------------------------------------------
 static bool g_drv_enable      = false;
@@ -298,8 +309,39 @@ void ProblemGenerator::UserProblem(ParameterInput *pin, const bool restart) {
   g_r_inner   = pin->GetOrAddReal("problem", "r_inner",
                                   pmy_mesh_->mesh_size.x1min);
   g_rA_target = pin->GetOrAddReal("problem", "alfven_point_target", 13.0);
+  g_beta_inner = pin->GetOrAddReal("problem", "beta_inner", 1.0);
   g_r_ref     = pin->GetOrAddReal("problem", "r_ref",
                                   std::max(2.0, g_r_inner + 1.0));
+  // B0_mode selects how the radial monopole strength is calibrated:
+  //   "alfven_point" (default): B0 chosen so M_A = 1 at r = alfven_point_target.
+  //   "beta_inner"            : B0 = sqrt(2 p(r_inner) / beta_inner). Useful
+  //                             when the natural setup parameter is the
+  //                             inner-boundary plasma beta. Note that the
+  //                             radial monopole carries no current away from
+  //                             r=0 so it is force-free; changing beta_inner
+  //                             only rescales the magnetic / Alfvenic
+  //                             background quantities (B_r, v_A, M_A), it
+  //                             leaves the hydrodynamic Parker solution
+  //                             (rho(r), p(r), U(r)) unchanged.
+  {
+    const std::string mode = pin->GetOrAddString("problem", "B0_mode",
+                                                 "alfven_point");
+    if (mode == "alfven_point") {
+      g_B0_mode = 0;
+    } else if (mode == "beta_inner") {
+      g_B0_mode = 1;
+    } else {
+      std::cout << "### FATAL ERROR: <problem>/B0_mode must be"
+                << " 'alfven_point' or 'beta_inner', got '" << mode << "'"
+                << std::endl;
+      std::exit(EXIT_FAILURE);
+    }
+    if (g_B0_mode == 1 && g_beta_inner <= 0.0) {
+      std::cout << "### FATAL ERROR: beta_inner must be > 0 for"
+                << " B0_mode=beta_inner, got " << g_beta_inner << std::endl;
+      std::exit(EXIT_FAILURE);
+    }
+  }
   if (std::fabs(g_gamma - eos.gamma) > 1.0e-12) {
     std::cout << "### FATAL ERROR: parker_wind_aw requires <problem>/gamma_poly"
               << " == <mhd>/gamma. Got " << g_gamma << " vs " << eos.gamma
@@ -387,11 +429,27 @@ void ProblemGenerator::UserProblem(ParameterInput *pin, const bool restart) {
           / (g_ac * g_rcrit * g_rcrit);
   g_K_poly = g_ac * g_ac
            / (g_gamma * std::pow(g_rho_c, g_gamma - 1.0));
+  // analytic state at r_inner (used for beta_inner mode and for diagnostics)
+  Real p_inner;
+  {
+    Real Udum, rhodum;
+    EvaluatePolytropicParker(g_r_inner, g_rcrit, g_ac, g_gamma, g_rho_c,
+                             &Udum, &rhodum, &p_inner);
+  }
   Real U_rA, rho_rA, p_rA;
   EvaluatePolytropicParker(g_rA_target, g_rcrit, g_ac, g_gamma, g_rho_c,
                            &U_rA, &rho_rA, &p_rA);
-  g_B0 = U_rA * std::sqrt(rho_rA)
-       * (g_rA_target / g_r_inner) * (g_rA_target / g_r_inner);
+  if (g_B0_mode == 1) {
+    // beta_inner: B0 = sqrt(2 p_inner / beta_inner) in code units where
+    // magnetic pressure = B^2 / 2.
+    g_B0 = std::sqrt(2.0 * p_inner / g_beta_inner);
+  } else {
+    // alfven_point: M_A(r=rA_target) = 1 -> B0 = U(rA) sqrt(rho(rA)) (rA/r_inner)^2
+    g_B0 = U_rA * std::sqrt(rho_rA)
+         * (g_rA_target / g_r_inner) * (g_rA_target / g_r_inner);
+  }
+  // Always recompute the realised beta_inner for the log/CSV diagnostics.
+  const Real beta_inner_realised = 2.0 * p_inner / (g_B0 * g_B0);
 
   // ---------- log derived values ----------------------------------------------
   if (global_variable::my_rank == 0) {
@@ -405,9 +463,16 @@ void ProblemGenerator::UserProblem(ParameterInput *pin, const bool restart) {
               << "[parker_wind_aw] U_inner   = " << U_inner << "\n"
               << "[parker_wind_aw] rho_c     = " << g_rho_c << "\n"
               << "[parker_wind_aw] K_poly    = " << g_K_poly << "\n"
+              << "[parker_wind_aw] p_inner   = " << p_inner << "\n"
               << "[parker_wind_aw] rA_target = " << g_rA_target << "\n"
               << "[parker_wind_aw] U(rA)     = " << U_rA << "\n"
               << "[parker_wind_aw] rho(rA)   = " << rho_rA << "\n"
+              << "[parker_wind_aw] B0_mode   = "
+              << (g_B0_mode == 1 ? "beta_inner" : "alfven_point") << "\n";
+    if (g_B0_mode == 1) {
+      std::cout << "[parker_wind_aw] beta_inner_req = " << g_beta_inner << "\n";
+    }
+    std::cout << "[parker_wind_aw] beta_inner     = " << beta_inner_realised << "\n"
               << "[parker_wind_aw] B0        = " << g_B0 << "\n"
               << "[parker_wind_aw] r_ref     = " << g_r_ref << "\n"
               << "[parker_wind_aw] driver    = "
@@ -712,7 +777,7 @@ void WriteBackgroundWkbCsv(Mesh *pm) {
   }
   out.precision(10);
   out << std::scientific;
-  out << "r,rho,p,U,a,Br,vA,MA,UplusvA,tau_plus,"
+  out << "r,rho,p,U,a,Br,vA,MA,beta,UplusvA,tau_plus,"
       << "HO_factor,z_wkb_rel,du_wkb_rel,dB_over_sqrtrho_wkb_rel,dB_wkb_rel,"
       << "area,energy_flux_proxy_rel,action_proxy_rel\n";
 
@@ -769,9 +834,12 @@ void WriteBackgroundWkbCsv(Mesh *pm) {
     Real area   = r[i] * r[i];
     Real flux_rel = (area * rho[i] * (U[i] + vA[i]) * z_rel * z_rel) / flux_ref;
     Real act_rel  = (area * rho[i] * z_rel * z_rel) / act_ref;
+    // Plasma beta (code units: magnetic pressure = B^2/2).
+    Real beta = 2.0 * p[i] / (Br[i] * Br[i]);
     out << r[i] << "," << rho[i] << "," << p[i] << "," << U[i] << ","
         << a_s[i] << "," << Br[i] << "," << vA[i] << "," << MA[i] << ","
-        << Upv[i] << "," << tau[i] << "," << HO[i] << "," << z_rel << ","
+        << beta << "," << Upv[i] << "," << tau[i] << "," << HO[i] << ","
+        << z_rel << ","
         << du_rel << "," << dB_over_sqrtrho_rel << "," << dB_rel << ","
         << area << "," << flux_rel << "," << act_rel << "\n";
   }

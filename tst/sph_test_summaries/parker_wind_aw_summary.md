@@ -38,7 +38,9 @@ Key `<problem>` parameters (full list in
 | `GM`                  | gravity (matches `<mhd_srcterms>/r_inv_sq_gm`) |
 | `rcrit`               | Parker critical radius                         |
 | `rho_inner`           | base density at `r_inner`                      |
-| `alfven_point_target` | radius where M_A=1                             |
+| `B0_mode`             | `alfven_point` (default) or `beta_inner`       |
+| `alfven_point_target` | radius where M_A=1 (used if `B0_mode=alfven_point`) |
+| `beta_inner`          | requested plasma beta at `r_inner` (used if `B0_mode=beta_inner`) |
 | `r_ref`               | WKB normalization radius                       |
 | `driver_enable`       | true/false                                     |
 | `driver_amp`          | transverse-velocity amplitude (code units)     |
@@ -91,6 +93,27 @@ With `driver_b_sign = -1` (default), `B_perp = -sqrt(rho) v_perp`, hence
 `z+ = 2 v_perp` and `z- = 0` exactly at the boundary, so the driver excites
 only the outgoing branch in the boundary cell. The finalizer reports
 `max|z+|`, `max|z-|`, and the ratio.
+
+### 4b. Setting the radial monopole strength
+
+The radial monopole `B_r(r) = B0 (r_inner / r)^2` carries no current away from
+`r = 0`, so it is force-free in the spherical shell. Changing the calibration
+of `B0` therefore only rescales the magnetic and Alfvenic background
+quantities (`B_r`, `v_A`, `M_A`, `beta`); the hydrodynamic Parker solution
+`rho(r)`, `p(r)`, `U(r)` is unchanged.
+
+Two equivalent calibrations are provided via `<problem>/B0_mode`:
+
+- `B0_mode = alfven_point` (default): `B0` is chosen so that
+  `M_A(r = alfven_point_target) = 1`,
+  i.e. `B0 = U(rA) sqrt(rho(rA)) (rA / r_inner)^2`.
+- `B0_mode = beta_inner`: `B0 = sqrt(2 p(r_inner) / beta_inner)`
+  (code units, magnetic pressure = `B^2 / 2`). The realised inner-boundary
+  beta is printed at startup and written into the background CSV.
+
+The `<csv_dir>/<label>_background_wkb.csv` profile now has a `beta = 2 p / B_r^2`
+column, and `plot_aw_driver.py` adds `beta(r)` to the analytic-background
+figure.
 
 ## 5. Analytic background and derived values (default input)
 

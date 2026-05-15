@@ -77,7 +77,14 @@ GM                    = 4.0
 rcrit                 = 2.0
 rho_inner             = 1.0
 r_inner               = 1.0
+# Radial monopole strength is selected by B0_mode (default "alfven_point").
+#   B0_mode = "alfven_point" -> uses alfven_point_target to set B0
+#   B0_mode = "beta_inner"   -> uses beta_inner, sets B0 = sqrt(2 p_inner / beta_inner)
+# The radial monopole is force-free away from r=0, so this only rescales the
+# magnetic/Alfvenic background -- it leaves rho(r), p(r), U(r) untouched.
+B0_mode               = alfven_point
 alfven_point_target   = 13.0
+beta_inner            = 1.0
 r_ref                 = 2.0
 
 # Driver ---------------------------------------------------------------------
